@@ -184,8 +184,8 @@ export async function splitDataset(
   }
 
   const absoluteOutputDir = path.resolve(outputDir);
-  if (absoluteOutputDir === root) {
-    throw new Error('Output directory cannot be the same as the input directory.');
+  if (areSamePath(root, absoluteOutputDir)) {
+    throw new Error('output directory must be different from the input dataset directory.');
   }
   await rm(absoluteOutputDir, {recursive: true, force: true});
 
@@ -1003,4 +1003,12 @@ function toRelative(root: string, filePath: string): string {
 
 function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code);
+}
+
+function areSamePath(left: string, right: string): boolean {
+  return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
+}
+
+function areSamePath(left: string, right: string): boolean {
+  return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
 }

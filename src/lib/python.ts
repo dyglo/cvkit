@@ -57,7 +57,7 @@ function spawnWorker<T>(command: string, args: string[]): Promise<T> {
 
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `Worker ${workerFileName(args[0])} exited with code ${code}`));
+        reject(new Error(stderr.trim() || `Worker ${workerFileName(args)} exited with code ${code}`));
         return;
       }
 
@@ -70,8 +70,9 @@ function spawnWorker<T>(command: string, args: string[]): Promise<T> {
   });
 }
 
-function workerFileName(value?: string): string {
-  return value ? path.basename(value) : 'worker';
+function workerFileName(args: string[]): string {
+  const candidate = [...args].reverse().find((value) => value.endsWith('.py'));
+  return candidate ? path.basename(candidate) : 'worker';
 }
 
 function remapPythonError(error: unknown): Error {

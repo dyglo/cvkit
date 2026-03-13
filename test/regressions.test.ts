@@ -13,6 +13,16 @@ test('maskConfigValue does not leak short secrets', () => {
   assert.doesNotMatch(masked, /sk-test/);
 });
 
+test('maskConfigValue still masks PASSWORD and bare KEY secret names', () => {
+  const passwordMasked = maskConfigValue('DB_PASSWORD', 'hunter2');
+  const keyMasked = maskConfigValue('PRIVATE_KEY', 'abcd1234');
+
+  assert.notEqual(passwordMasked, 'hunter2');
+  assert.notEqual(keyMasked, 'abcd1234');
+  assert.doesNotMatch(passwordMasked, /hunter2/);
+  assert.doesNotMatch(keyMasked, /abcd1234/);
+});
+
 test('validateDataset resolves COCO images from images subdirectory and counts valid images correctly', async () => {
   const datasetDir = await mkdtemp(path.join(os.tmpdir(), 'cvkit-coco-'));
   try {
@@ -78,6 +88,25 @@ test('splitDataset copies COCO images from images subdirectory', async () => {
     const copied = path.join(outputDir, 'train', 'images', 'frame-1.png');
     const copiedBytes = await readFile(copied);
     assert.ok(copiedBytes.length > 0);
+  } finally {
+    await safeCleanup(datasetDir);
+  }
+});
+
+test('splitDataset rejects output directory that matches input dataset directory', async () => {
+  const datasetDir = await mkdtemp(path.join(os.tmpdir(), 'cvkit-split-guard-'));
+  try {
+    const imagesDir = path.join(datasetDir, 'images');
+    const labelsDir = path.join(datasetDir, 'labels');
+    await mkdir(imagesDir, {recursive: true});
+    await mkdir(labelsDir, {recursive: true});
+    await createImage(path.join(imagesDir, 'sample.png'));
+    await writeFile(path.join(labelsDir, 'sample.txt'), '0 0.5 0.5 0.25 0.25\n', 'utf8');
+
+    await assert.rejects(
+      () => splitDataset(datasetDir, 'yolo', datasetDir, {train: 70, val: 20, test: 10}, 42),
+      /output directory must be different/
+    );
   } finally {
     await safeCleanup(datasetDir);
   }

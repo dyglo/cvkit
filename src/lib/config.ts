@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {ConfigValues} from '../types/index.js';
 
-const SECRET_KEY_PATTERN = /(API_KEY|SECRET|TOKEN)/i;
+const SECRET_KEY_PATTERN = /(KEY|TOKEN|SECRET|PASSWORD)/i;
 
 export function getConfigDir(): string {
   return path.join(os.homedir(), '.cvkit');
