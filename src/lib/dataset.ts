@@ -184,8 +184,10 @@ export async function splitDataset(
   }
 
   const absoluteOutputDir = path.resolve(outputDir);
+  if (absoluteOutputDir === root) {
+    throw new Error('Output directory cannot be the same as the input directory.');
+  }
   await rm(absoluteOutputDir, {recursive: true, force: true});
-  await mkdir(absoluteOutputDir, {recursive: true});
 
   const items = await buildSplitItems(root, format);
   if (items.length === 0) {
