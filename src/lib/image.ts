@@ -92,9 +92,9 @@ function describeChannels(channels: number, space?: string): string {
 
   if (channels === 3) {
     return space === 'srgb' ? 'RGB' : 'RGB';
+  if (channels === 3) {
+    return 'RGB';
   }
-
-  if (channels === 4) {
     return 'RGBA';
   }
 
