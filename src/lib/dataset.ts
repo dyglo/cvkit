@@ -1008,7 +1008,3 @@ function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
 function areSamePath(left: string, right: string): boolean {
   return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
 }
-
-function areSamePath(left: string, right: string): boolean {
-  return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
-}
