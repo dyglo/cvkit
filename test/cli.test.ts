@@ -7,13 +7,13 @@ import {spawn} from 'node:child_process';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const cliEntry = path.join(projectRoot, 'src', 'cli.ts');
-const sampleImage = path.join(projectRoot, 'test', 'fixtures', 'sample.svg');
+const sampleImage = path.join(projectRoot, 'test', 'fixtures', 'sample.png');
 const nonImage = path.join(projectRoot, 'test', 'fixtures', 'not-image.txt');
 
 test('cvkit --version returns package version', async () => {
   const result = await runCli(['--version']);
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /0\.1\.0/);
+  assert.match(result.stdout, /cvkit v0\.1\.0/);
 });
 
 test('cvkit --help returns usage information', async () => {
@@ -34,20 +34,20 @@ test('bare cvkit renders splash and exits after Enter', async () => {
 test('inspect reports metadata for a valid image', async () => {
   const result = await runCli(['inspect', sampleImage]);
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /Dimensions\s+4 x 3/);
-  assert.match(result.stdout, /Format\s+svg/);
+  assert.match(result.stdout, /Dimensions\s+100 × 100/);
+  assert.match(result.stdout, /Format\s+PNG/);
 });
 
 test('inspect fails for a missing image', async () => {
   const result = await runCli(['inspect', 'missing-image.png']);
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /Image not found/);
+  assert.match(result.stderr, /File not found/);
 });
 
 test('inspect fails for a non-image file', async () => {
   const result = await runCli(['inspect', nonImage]);
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /Unsupported image format|Corrupt or unreadable image file/);
+  assert.match(result.stderr, /Unsupported format|Corrupt or unreadable image/);
 });
 
 test('config set creates config file and config list masks secrets', async () => {

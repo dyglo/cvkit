@@ -9,7 +9,7 @@
  ╚═════╝  ╚═══╝  ╚═╝  ╚═╝╚═╝   ╚═╝
 ```
 
-`cvkit` is a TypeScript CLI for computer vision engineers. Phase 0 provides the initial terminal experience, image inspection, local config storage, packaging, and CI.
+Computer Vision Toolkit for terminal workflows.
 
 ## Install
 
@@ -17,85 +17,48 @@
 npm install -g cvkit
 ```
 
-For local development:
-
-```bash
-npm install
-npm run dev
-```
-
-## Quick Start
+## Quick start
 
 ```bash
 cvkit
-cvkit inspect ./sample.png
-cvkit config set OPENAI_API_KEY=sk-example
-cvkit config list
+cvkit inspect ./test/fixtures/sample.png
+cvkit config set OPENAI_API_KEY=sk-...
 ```
 
-## Commands
+## Command reference
 
 | Command | Description |
-|---|---|
-| `cvkit` | Shows the splash screen and continues to help after Enter |
-| `cvkit --help` | Shows help |
-| `cvkit --version` | Shows the package version |
-| `cvkit inspect <image>` | Prints image metadata via `sharp` |
-| `cvkit config set KEY=VALUE` | Persists a config value to the user config file |
-| `cvkit config list` | Lists config values and masks secrets |
+| --- | --- |
+| `cvkit` | Show the banner splash screen, then help |
+| `cvkit inspect <imagePath>` | Inspect image metadata |
+| `cvkit config set <KEY=VALUE>` | Save a config value |
+| `cvkit config list` | List config values with secret masking |
+| `cvkit dataset inspect <dir>` | Inspect dataset layout and class coverage |
+| `cvkit dataset validate <dir>` | Validate YOLO, COCO, or Pascal VOC annotations |
+| `cvkit dataset split <dir>` | Stratified dataset split |
+| `cvkit dataset dupes <dir>` | Detect near-duplicate images |
+| `cvkit dataset stats <dir>` | Compute image statistics via Python worker |
 
-## Config
+## Configuration
 
-`cvkit` stores configuration in:
-
-- Windows: `%USERPROFILE%\.cvkit\config.json`
-- macOS/Linux: `~/.cvkit/config.json`
-
-Example:
+Configuration lives in `~/.cvkit/config.json`.
 
 ```bash
-cvkit config set MODEL=gpt-5.4
-cvkit config set OPENAI_API_KEY=sk-example
+cvkit config set OPENAI_API_KEY=sk-...
+cvkit config set DEFAULT_MODEL=gpt-5-mini-2025-08-07
 cvkit config list
-```
-
-## Development
-
-```bash
-npm run typecheck
-npm run test
-npm run build
 ```
 
 ## Roadmap
 
-### Phase 0
-- Foundation scaffold
-- Splash banner
-- `inspect`
-- `config`
-- npm packaging and CI
+- Phase 0: scaffold, splash screen, inspect, config
+- Phase 1: dataset inspect, validate, split, dupes, stats
+- Phase 2: annotation conversion utilities
+- Phase 3: OpenAI-powered CV assistance
+- Phase 4: inference and benchmarking helpers
+- Phase 5: augmentation and preprocessing workflows
+- Phase 6: agentic computer vision pipelines
 
-### Phase 1
-- Dataset inspection
-- Validation
-- Splits
-- Duplicate detection
-- Statistics via Python workers
+## License
 
-### Phase 2
-- Annotation format conversion
-
-### Phase 3
-- AI vision assistant
-- Future OpenAI integration will use the Responses API as the baseline for GPT-5-family commands
-
-### Phase 4
-- Inference engine
-
-### Phase 5
-- Augmentation studio
-
-### Phase 6
-- Agent mode
-
+MIT

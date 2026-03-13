@@ -1,0 +1,57 @@
+import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type {ConfigValues} from '../types/index.js';
+
+const SECRET_KEY_PATTERN = /(API_KEY|SECRET|TOKEN)/i;
+
+export function getConfigDir(): string {
+  return path.join(os.homedir(), '.cvkit');
+}
+
+export function getConfigPath(): string {
+  return path.join(getConfigDir(), 'config.json');
+}
+
+export async function readConfig(): Promise<ConfigValues> {
+  try {
+    const raw = await readFile(getConfigPath(), 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Invalid config file format.');
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).map(([key, value]) => [key, String(value)])
+    );
+  } catch (error: unknown) {
+    if (isErrno(error, 'ENOENT')) {
+      return {};
+    }
+
+    throw error;
+  }
+}
+
+export async function setConfigValue(key: string, value: string): Promise<void> {
+  const existing = await readConfig();
+  existing[key] = value;
+  await mkdir(getConfigDir(), {recursive: true});
+  await writeFile(getConfigPath(), `${JSON.stringify(existing, null, 2)}\n`, 'utf8');
+}
+
+export function maskConfigValue(key: string, value: string): string {
+  if (!SECRET_KEY_PATTERN.test(key)) {
+    return value;
+  }
+
+  return value.length <= 8 ? `${value}...` : `${value.slice(0, 8)}...`;
+}
+
+export function isSecretKey(key: string): boolean {
+  return SECRET_KEY_PATTERN.test(key);
+}
+
+function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code);
+}
