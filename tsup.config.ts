@@ -4,7 +4,7 @@ export default defineConfig({
   entry: ['src/index.tsx'],
   format: ['esm'],
   outDir: 'dist',
-  target: 'node18',
+  target: 'node20',
   bundle: true,
   splitting: false,
   sourcemap: false,

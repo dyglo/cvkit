@@ -1,5 +1,6 @@
 import {spawn} from 'node:child_process';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 const PYTHON_CANDIDATES: Array<{command: string; prefixArgs: string[]}> = [
   {command: 'python3', prefixArgs: []},
@@ -8,7 +9,7 @@ const PYTHON_CANDIDATES: Array<{command: string; prefixArgs: string[]}> = [
 ];
 
 export async function runPythonWorker<T>(workerFile: string, args: string[]): Promise<T> {
-  const workerPath = path.join(process.cwd(), 'workers', workerFile);
+  const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'workers', workerFile);
   let lastError: Error | null = null;
 
   for (const candidate of PYTHON_CANDIDATES) {

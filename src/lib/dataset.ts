@@ -490,7 +490,7 @@ async function validateYoloDataset(inputDir: string, fix: boolean): Promise<Vali
       nextLines.push([String(classId), ...normalized.map((value) => trimFloat(value))].join(' '));
     }
 
-    if (fix && hadFix) {
+    if (fix && hadFix && !hasBlockingIssue) {
       await writeFile(labelPath, `${nextLines.join('\n')}\n`, 'utf8');
       fixedCount += 1;
     }
@@ -520,6 +520,7 @@ async function validateCocoDataset(inputDir: string): Promise<ValidationResult> 
   }
 
   const issues: ValidationIssue[] = [];
+  const affectedImages = new Set<string>();
   const jsonFiles = (await walk(root)).filter((filePath) => path.extname(filePath).toLowerCase() === '.json');
 
   for (const jsonFile of jsonFiles) {
@@ -541,17 +542,20 @@ async function validateCocoDataset(inputDir: string): Promise<ValidationResult> 
         }
 
         imageIds.set(image.id, image as CocoImageRecord);
-        if (!(await fileExists(resolveDatasetImage(root, image.file_name)))) {
+        const resolvedImagePath = await resolveDatasetImage(root, image.file_name);
+        if (!(await fileExists(resolvedImagePath))) {
           issues.push({
             file: toRelative(root, jsonFile),
             type: 'Annotation image missing',
             detail: image.file_name
           });
+          affectedImages.add(toRelative(root, resolvedImagePath));
         }
       }
 
       for (const annotation of parsed.annotations as CocoAnnotationRecord[]) {
-        if (!imageIds.has(annotation.image_id)) {
+        const imageRecord = imageIds.get(annotation.image_id);
+        if (!imageRecord) {
           issues.push({
             file: toRelative(root, jsonFile),
             type: 'Annotation image missing',
@@ -565,6 +569,9 @@ async function validateCocoDataset(inputDir: string): Promise<ValidationResult> 
             type: 'Zero-sized bbox',
             detail: `image_id=${annotation.image_id}`
           });
+          if (imageRecord) {
+            affectedImages.add(toRelative(root, await resolveDatasetImage(root, imageRecord.file_name)));
+          }
         }
       }
     } catch {
@@ -576,11 +583,10 @@ async function validateCocoDataset(inputDir: string): Promise<ValidationResult> 
     }
   }
 
-  const affectedFiles = new Set(issues.map((issue) => issue.file));
   return {
     format: 'coco',
     scannedImages: images.length,
-    validImages: Math.max(0, images.length - affectedFiles.size),
+    validImages: Math.max(0, images.length - affectedImages.size),
     issues,
     fixedCount: 0,
     manualReviewCount: issues.length
@@ -595,6 +601,7 @@ async function validatePascalDataset(inputDir: string): Promise<ValidationResult
   }
 
   const issues: ValidationIssue[] = [];
+  const affectedImages = new Set<string>();
   const xmlFiles = (await walk(root)).filter((filePath) => path.extname(filePath).toLowerCase() === '.xml');
 
   for (const xmlFile of xmlFiles) {
@@ -615,12 +622,16 @@ async function validatePascalDataset(inputDir: string): Promise<ValidationResult
         type: 'Missing required tags',
         detail: 'filename'
       });
-    } else if (!(await fileExists(resolveDatasetImage(root, filename)))) {
-      issues.push({
-        file: toRelative(root, xmlFile),
-        type: 'Annotation image missing',
-        detail: filename
-      });
+    } else {
+      const resolvedImagePath = await resolveDatasetImage(root, filename);
+      if (!(await fileExists(resolvedImagePath))) {
+        issues.push({
+          file: toRelative(root, xmlFile),
+          type: 'Annotation image missing',
+          detail: filename
+        });
+        affectedImages.add(toRelative(root, resolvedImagePath));
+      }
     }
 
     const objects = [...xml.matchAll(/<object>([\s\S]*?)<\/object>/gi)];
@@ -645,15 +656,17 @@ async function validatePascalDataset(inputDir: string): Promise<ValidationResult
           type: 'Invalid bounding box',
           detail: `xmin=${xmin}, ymin=${ymin}, xmax=${xmax}, ymax=${ymax}`
         });
+        if (filename) {
+          affectedImages.add(toRelative(root, await resolveDatasetImage(root, filename)));
+        }
       }
     }
   }
 
-  const affectedFiles = new Set(issues.map((issue) => issue.file));
   return {
     format: 'pascal-voc',
     scannedImages: images.length,
-    validImages: Math.max(0, images.length - affectedFiles.size),
+    validImages: Math.max(0, images.length - affectedImages.size),
     issues,
     fixedCount: 0,
     manualReviewCount: issues.length
@@ -686,14 +699,17 @@ async function buildSplitItems(root: string, format: AnnotationFormat): Promise<
       annotationsByImage.set(annotation.image_id, bucket);
     }
 
-    return document.images
-      .map((image) => ({
-        imagePath: resolveDatasetImage(root, image.file_name),
-        relativeImagePath: toRelative(root, resolveDatasetImage(root, image.file_name)),
-        classIds: (annotationsByImage.get(image.id) ?? []).map((annotation) => annotation.category_id),
-        annotationRecord: image
-      }))
-      .filter((item) => item.imagePath);
+    return Promise.all(
+      document.images.map(async (image) => {
+        const imagePath = await resolveDatasetImage(root, image.file_name);
+        return {
+          imagePath,
+          relativeImagePath: toRelative(root, imagePath),
+          classIds: (annotationsByImage.get(image.id) ?? []).map((annotation) => annotation.category_id),
+          annotationRecord: image
+        };
+      })
+    );
   }
 
   const images = await collectImages(root);
@@ -945,14 +961,17 @@ function readXmlTag(xml: string, tagName: string): string | undefined {
   return xml.match(new RegExp(`<${tagName}>(.*?)</${tagName}>`, 'i'))?.[1]?.trim();
 }
 
-function resolveDatasetImage(root: string, fileName: string): string {
+async function resolveDatasetImage(root: string, fileName: string): Promise<string> {
   if (fileName.includes('/') || fileName.includes('\\')) {
     return path.join(root, fileName);
   }
 
   const direct = path.join(root, fileName);
-  const imagesDir = path.join(root, 'images', fileName);
-  return direct.includes(path.sep) && direct !== root ? direct : imagesDir;
+  if (await fileExists(direct)) {
+    return direct;
+  }
+
+  return path.join(root, 'images', fileName);
 }
 
 function trimFloat(value: number): string {

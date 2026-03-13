@@ -13,7 +13,7 @@
     "workers"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "dev": "tsx src/index.tsx",
@@ -21,7 +21,7 @@
     "postbuild": "node -e \"import('node:fs').then((fs)=>fs.chmodSync('dist/index.js',0o755))\"",
     "fixtures": "tsx scripts/gen-fixtures.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node --import tsx --test"
   },
   "keywords": [
     "computer-vision",

@@ -45,7 +45,15 @@ export function maskConfigValue(key: string, value: string): string {
     return value;
   }
 
-  return value.length <= 8 ? `${value}...` : `${value.slice(0, 8)}...`;
+  if (value.length <= 4) {
+    return '*'.repeat(value.length);
+  }
+
+  if (value.length <= 8) {
+    return `${value.slice(0, 1)}${'*'.repeat(value.length - 2)}${value.slice(-1)}`;
+  }
+
+  return `${value.slice(0, 2)}${'*'.repeat(Math.max(4, value.length - 4))}${value.slice(-2)}`;
 }
 
 export function isSecretKey(key: string): boolean {
