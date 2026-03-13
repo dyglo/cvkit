@@ -8,8 +8,22 @@ const PYTHON_CANDIDATES: Array<{command: string; prefixArgs: string[]}> = [
   {command: 'py', prefixArgs: ['-3']}
 ];
 
+export class PythonWorkerError extends Error {
+  stderr: string;
+  stdout: string;
+  exitCode?: number;
+
+  constructor(message: string, options: {stderr?: string; stdout?: string; exitCode?: number} = {}) {
+    super(message);
+    this.name = 'PythonWorkerError';
+    this.stderr = options.stderr ?? '';
+    this.stdout = options.stdout ?? '';
+    this.exitCode = options.exitCode;
+  }
+}
+
 export async function runPythonWorker<T>(workerFile: string, args: string[]): Promise<T> {
-  const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'workers', workerFile);
+  const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'workers', workerFile);
   let lastError: Error | null = null;
 
   for (const candidate of PYTHON_CANDIDATES) {
@@ -57,7 +71,13 @@ function spawnWorker<T>(command: string, args: string[]): Promise<T> {
 
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `Worker ${workerFileName(args)} exited with code ${code}`));
+        reject(
+          new PythonWorkerError(stderr.trim() || `Worker ${workerFileName(args)} exited with code ${code}`, {
+            stderr,
+            stdout,
+            exitCode: code ?? undefined
+          })
+        );
         return;
       }
 
@@ -76,9 +96,17 @@ function workerFileName(args: string[]): string {
 }
 
 function remapPythonError(error: unknown): Error {
+  if (error instanceof PythonWorkerError) {
+    if (/No module named|ModuleNotFoundError/i.test(error.message) || /No module named|ModuleNotFoundError/i.test(error.stderr)) {
+      return new Error('Missing dependencies. Run: pip install -r workers/requirements.txt');
+    }
+
+    return error;
+  }
+
   if (error instanceof Error) {
     if (error.message === '__PYTHON_NOT_FOUND__') {
-      return new Error('Python 3.8+ required. Install from https://python.org');
+      return new Error('Python 3.9+ required. Install from https://python.org');
     }
 
     if (/No module named|ModuleNotFoundError/i.test(error.message)) {
