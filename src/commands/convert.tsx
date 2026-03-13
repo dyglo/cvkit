@@ -94,7 +94,7 @@ function ConvertScreen({
           '--to-format',
           toFormat,
           '--output',
-          output
+          path.resolve(output)
         ];
 
         if (classes) {

@@ -1,3 +1,4 @@
+import {existsSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -23,7 +24,7 @@ export class PythonWorkerError extends Error {
 }
 
 export async function runPythonWorker<T>(workerFile: string, args: string[]): Promise<T> {
-  const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'workers', workerFile);
+  const workerPath = resolvePythonWorkerPath(workerFile);
   let lastError: Error | null = null;
 
   for (const candidate of PYTHON_CANDIDATES) {
@@ -40,6 +41,18 @@ export async function runPythonWorker<T>(workerFile: string, args: string[]): Pr
   }
 
   throw remapPythonError(lastError);
+}
+
+export function resolvePythonWorkerPath(workerFile: string, baseUrl = import.meta.url): string {
+  const moduleDir = path.dirname(fileURLToPath(baseUrl));
+  const candidates = [
+    path.join(moduleDir, '..', '..', 'workers', workerFile),
+    path.join(moduleDir, '..', 'workers', workerFile),
+    path.join(process.cwd(), 'workers', workerFile)
+  ];
+
+  const resolved = candidates.find((candidate) => existsSync(candidate));
+  return resolved ?? candidates[0]!;
 }
 
 function spawnWorker<T>(command: string, args: string[]): Promise<T> {

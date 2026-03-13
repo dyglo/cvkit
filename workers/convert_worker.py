@@ -64,6 +64,7 @@ def convert_dataset(
     classes_arg: str | None,
     dry_run: bool,
 ) -> dict:
+    output_dir = Path(output_arg).expanduser().resolve()
     all_images = collect_images(input_dir)
     if not all_images:
         return {
@@ -71,7 +72,7 @@ def convert_dataset(
             "images_processed": 0,
             "annotations_converted": 0,
             "classes": [],
-            "output_dir": output_arg,
+            "output_dir": str(output_dir),
             "dry_run": dry_run,
             "warnings": [f"No images found in {input_dir} — nothing to convert."]
         }
@@ -95,15 +96,12 @@ def convert_dataset(
             "images_processed": images_processed,
             "annotations_converted": annotations_converted,
             "classes": result_classes,
-            "output_dir": output_arg,
+            "output_dir": str(output_dir),
             "dry_run": True,
             "warnings": warnings,
         }
 
-    output_dir = Path(output_arg).expanduser().resolve()
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_output_directory(output_dir, output_arg)
 
     try:
         save_target_dataset(
@@ -116,7 +114,7 @@ def convert_dataset(
     except Exception as error:
         emit_partial_error(
             error=str(error),
-            output_dir=output_arg,
+            output_dir=str(output_dir),
             dry_run=False,
             classes=result_classes,
             warnings=warnings,
@@ -129,7 +127,7 @@ def convert_dataset(
         "images_processed": images_processed,
         "annotations_converted": annotations_converted,
         "classes": result_classes,
-        "output_dir": output_arg,
+        "output_dir": str(output_dir),
         "dry_run": False,
         "warnings": warnings,
     }
@@ -162,7 +160,7 @@ def load_source_dataset(*, input_dir: Path, source_format: str, classes_arg: str
         annotation_file = resolve_single_file(input_dir, preferred="annotations.json", extension=".json")
         annotations = globox.AnnotationSet.from_coco(file_path=str(annotation_file))
         image_sources = resolve_annotation_images(annotations, input_dir, image_index)
-        source_label_order = extract_coco_labels(annotations)
+        source_label_order = read_coco_category_names(annotation_file)
     elif source_format == "pascal-voc":
         annotation_dir = resolve_annotation_dir(input_dir, "annotations")
         annotations = globox.AnnotationSet.from_pascal_voc(folder=str(annotation_dir))
@@ -281,11 +279,23 @@ def build_result_classes(dataset: dict) -> list[str]:
     return result
 
 
-def extract_coco_labels(annotations) -> list[str]:
-    mapping = getattr(annotations, "_id_to_label", None)
-    if isinstance(mapping, dict):
-        return [mapping[key] for key in sorted(mapping.keys())]
-    return extract_label_order(annotations)
+def read_coco_category_names(annotation_file: Path) -> list[str]:
+    with annotation_file.open(encoding="utf8") as handle:
+        content = json.load(handle)
+
+    categories = content.get("categories", [])
+    if not isinstance(categories, list):
+        return []
+
+    labels = []
+    for category in categories:
+        if not isinstance(category, dict):
+            continue
+        name = category.get("name")
+        if isinstance(name, str) and name and name not in labels:
+            labels.append(name)
+
+    return labels
 
 
 def extract_label_order(annotations) -> list[str]:
@@ -417,6 +427,18 @@ def resolve_classes_path(root: Path, classes_arg: str | None) -> Path | None:
         if candidate and candidate.is_file():
             return candidate
     return None
+
+
+def prepare_output_directory(output_dir: Path, output_arg: str):
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ConversionFailure(f"Output path '{output_arg}' already exists and is not a directory.")
+
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ConversionFailure(
+            f"Output directory '{output_arg}' already exists and is not empty. Remove it or choose a different --output path."
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
 
 def read_class_names(path: Path) -> list[str]:

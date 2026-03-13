@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {parseConvertFormat} from '../src/lib/convert.js';
+import {resolvePythonWorkerPath} from '../src/lib/python.js';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const cliEntry = path.join(projectRoot, 'src', 'cli.ts');
@@ -19,6 +20,17 @@ test('parseConvertFormat accepts supported formats and rejects invalid ones', ()
   assert.throws(
     () => parseConvertFormat('voc'),
     /Supported formats: yolo, coco, pascal-voc, labelme, cvat/
+  );
+});
+
+test('resolvePythonWorkerPath handles both source and bundled layouts', () => {
+  const sourceBase = new URL('file:///D:/projects/cvkit/src/lib/python.ts');
+  const distBase = new URL('file:///D:/projects/cvkit/dist/index.js');
+
+  assert.match(resolvePythonWorkerPath('convert_worker.py', sourceBase.href), /workers[\\/]convert_worker\.py$/);
+  assert.equal(
+    resolvePythonWorkerPath('convert_worker.py', distBase.href),
+    path.join(projectRoot, 'workers', 'convert_worker.py')
   );
 });
 
@@ -106,6 +118,30 @@ test('convert --dry-run does not write output files', async () => {
   }
 });
 
+test('convert resolves relative output paths in dry-run output', async () => {
+  const relativeOutput = path.join('test-output', 'convert-relative-check');
+  const absoluteOutput = path.resolve(projectRoot, relativeOutput);
+
+  try {
+    const result = await runCli([
+      'convert',
+      syntheticYolo,
+      '--from',
+      'yolo',
+      '--to',
+      'coco',
+      '--output',
+      relativeOutput,
+      '--dry-run'
+    ]);
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, new RegExp(escapeForRegex(absoluteOutput.replace(/[\\/]+$/, ''))));
+  } finally {
+    await safeCleanup(path.join(projectRoot, 'test-output'));
+  }
+});
+
 test('convert same format exits cleanly with warning and writes nothing', async () => {
   const outputDir = path.join(await mkdtemp(path.join(os.tmpdir(), 'cvkit-convert-same-parent-')), 'converted');
 
@@ -173,6 +209,33 @@ test('convert fails cleanly when YOLO classes metadata is missing', async () => 
   }
 });
 
+test('convert refuses to overwrite a non-empty output directory', async () => {
+  const outputDir = await mkdtemp(path.join(os.tmpdir(), 'cvkit-convert-existing-'));
+  const markerFile = path.join(outputDir, 'keep.txt');
+
+  try {
+    const fs = await import('node:fs/promises');
+    await fs.writeFile(markerFile, 'preserve me\n', 'utf8');
+
+    const result = await runCli([
+      'convert',
+      syntheticYolo,
+      '--from',
+      'yolo',
+      '--to',
+      'coco',
+      '--output',
+      outputDir
+    ]);
+
+    assert.equal(result.code, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /already\s+exists and is not empty/);
+    assert.equal(await readFile(markerFile, 'utf8'), 'preserve me\n');
+  } finally {
+    await safeCleanup(outputDir);
+  }
+});
+
 function runCli(
   args: string[],
   options: {home?: string} = {}
@@ -219,4 +282,8 @@ async function copyTree(source: string, destination: string): Promise<void> {
 
 async function safeCleanup(target: string): Promise<void> {
   await rm(target, {recursive: true, force: true});
+}
+
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
