@@ -22,6 +22,7 @@ test('cvkit --help returns usage information', async () => {
   assert.match(result.stdout, /Usage: cvkit/);
   assert.match(result.stdout, /inspect/);
   assert.match(result.stdout, /config/);
+  assert.match(result.stdout, /convert/);
 });
 
 test('bare cvkit renders splash and exits after Enter', async () => {

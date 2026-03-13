@@ -15,6 +15,8 @@ export type ImageMetadata = {
 
 export type AnnotationFormat = 'yolo' | 'coco' | 'pascal-voc';
 
+export type ConvertFormat = 'yolo' | 'coco' | 'pascal-voc' | 'labelme' | 'cvat';
+
 export type DatasetInspectResult = {
   datasetPath: string;
   imageCount: number;
@@ -88,4 +90,19 @@ export type StatsWorkerResult = {
     median_kb: number;
   };
   scanned: number;
+};
+
+export type ConvertWorkerResult = {
+  success: boolean;
+  images_processed: number;
+  annotations_converted: number;
+  classes: string[];
+  output_dir: string;
+  dry_run: boolean;
+  warnings: string[];
+};
+
+export type ConvertWorkerErrorPayload = Partial<ConvertWorkerResult> & {
+  success?: false;
+  error: string;
 };
