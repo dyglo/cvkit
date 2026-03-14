@@ -90,6 +90,26 @@ test('label-assist formats YOLO output correctly from parsed response', () => {
   ]);
 });
 
+test('label-assist parses annotations even when NOTES section is missing', () => {
+  const parsed = parseLabelAssistResponse([
+    'ANNOTATIONS:',
+    '0 0.512 0.423 0.234 0.187'
+  ].join('\n'));
+
+  assert.deepEqual(parsed, {
+    annotations: [
+      {
+        classId: 0,
+        xCenter: 0.512,
+        yCenter: 0.423,
+        width: 0.234,
+        height: 0.187
+      }
+    ],
+    notes: []
+  });
+});
+
 test('getPool throws correct error when DATABASE_URL not set', () => {
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;

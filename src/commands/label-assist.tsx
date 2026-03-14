@@ -65,7 +65,7 @@ export function registerLabelAssist(program: Command): void {
       }
 
       await inspectImage(resolvedImagePath);
-      const client = getOpenAIClient();
+      const client = await Promise.resolve(getOpenAIClient());
       const startedAt = Date.now();
       const runId = await safeCreateRun('label-assist');
 
@@ -118,9 +118,11 @@ export function registerLabelAssist(program: Command): void {
           classes,
           savePath,
           annotations: renderedLines.map((line) => line.yoloLine),
-          notes: renderedLines.map((line) =>
-            line.note ? `class: ${line.className}, confidence: ${line.confidence}, note: ${line.note}` : ''
-          ),
+          notes: renderedLines
+            .map((line) =>
+              line.note ? `class: ${line.className}, confidence: ${line.confidence}, note: ${line.note}` : ''
+            )
+            .filter(Boolean),
           tokensUsed: response.usage?.total_tokens ?? 0
         });
         await safeFinishRun(runId, 'success', Date.now() - startedAt);
@@ -145,12 +147,17 @@ export function parseLabelAssistResponse(raw: string): ParsedLabelAssistResponse
     .filter(Boolean);
   const annotationsStart = lines.findIndex((line) => line.toUpperCase() === 'ANNOTATIONS:');
   const notesStart = lines.findIndex((line) => line.toUpperCase() === 'NOTES:');
-  if (annotationsStart === -1 || notesStart === -1 || notesStart < annotationsStart) {
+  if (annotationsStart === -1) {
     throw new Error('Invalid label-assist response format.');
   }
 
-  const annotationLines = lines.slice(annotationsStart + 1, notesStart);
-  const noteLines = lines.slice(notesStart + 1);
+  const annotationEnd = notesStart === -1 ? lines.length : notesStart;
+  if (annotationEnd <= annotationsStart + 1) {
+    throw new Error('Invalid label-assist response format.');
+  }
+
+  const annotationLines = lines.slice(annotationsStart + 1, annotationEnd);
+  const noteLines = notesStart === -1 ? [] : lines.slice(notesStart + 1);
 
   return {
     annotations: annotationLines.map(parseAnnotationLine),

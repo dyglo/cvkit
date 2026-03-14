@@ -1,4 +1,4 @@
-import {readdir, writeFile} from 'node:fs/promises';
+import {readdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import {Command} from 'commander';
@@ -54,7 +54,11 @@ export function registerAnomaly(program: Command): void {
       const threshold = normalizeThreshold(options.threshold);
       const dirPath = path.resolve(dir);
       const imagePaths = await collectImagePaths(dirPath);
-      const client = getOpenAIClient();
+      if (imagePaths.length === 0) {
+        throw new Error(`No supported images found in ${dir}.`);
+      }
+
+      const client = await Promise.resolve(getOpenAIClient());
       const startedAt = Date.now();
       const runId = await safeCreateRun('anomaly');
       const results: AnomalyScanRow[] = [];
@@ -174,6 +178,18 @@ export function shouldIncludeFlagged(
 }
 
 export async function collectImagePaths(dirPath: string): Promise<string[]> {
+  const directoryInfo = await stat(dirPath).catch((error: unknown) => {
+    if (isErrno(error, 'ENOENT')) {
+      throw new Error(`Directory not found: ${dirPath}`);
+    }
+
+    throw error;
+  });
+
+  if (!directoryInfo.isDirectory()) {
+    throw new Error(`Directory not found: ${dirPath}`);
+  }
+
   const entries = await readdir(dirPath, {withFileTypes: true});
   const imagePaths: string[] = [];
 
@@ -320,6 +336,10 @@ function formatFileTimestamp(date: Date): string {
   const min = String(date.getMinutes()).padStart(2, '0');
   const ss = String(date.getSeconds()).padStart(2, '0');
   return `${yyyy}${mm}${dd}-${hh}${min}${ss}`;
+}
+
+function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code);
 }
 
 async function safeCreateRun(command: string): Promise<number | null> {
