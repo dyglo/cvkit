@@ -21,7 +21,7 @@ export async function renderInteractive(node: React.ReactNode): Promise<void> {
       stdout: process.stdout,
       stdin: process.stdin,
       patchConsole: false,
-      exitOnCtrlC: true
+      exitOnCtrlC: false
     });
 
     void app.waitUntilExit().then(() => resolve());

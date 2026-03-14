@@ -27,10 +27,87 @@ test('cvkit --help returns usage information', async () => {
 });
 
 test('bare cvkit renders splash and exits after Enter', async () => {
-  const result = await runCli([], {input: '\r'});
+  const result = await runCli([], {input: '\nexit\n'});
   assert.equal(result.code, 0);
   assert.match(result.stdout, /C O M P U T E R\s+V I S I O N\s+T O O L K I T/);
   assert.match(result.stdout, /Press Enter to continue/);
+  assert.match(result.stdout, /> exit/);
+  assert.match(result.stdout, /Goodbye\./);
+});
+
+test('repl mounts and renders persistent input prompt', async () => {
+  const result = await runCli([], {input: '\nhelp\nexit\n'});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /> help/);
+  assert.match(result.stdout, /> exit/);
+});
+
+test('repl empty input does not add a message', async () => {
+  const result = await runCli([], {input: '\n\nexit\n'});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /> \r?\n> exit/);
+  assert.doesNotMatch(result.stdout, /Unknown command/);
+});
+
+test('repl help command returns available commands', async () => {
+  const result = await runCli([], {input: '\nhelp\nexit\n'});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Available commands/);
+  assert.match(result.stdout, /inspect <path>/);
+});
+
+test('repl unknown command returns a suggestion', async () => {
+  const result = await runCli([], {input: '\nblah\nexit\n'});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Unknown command: blah/);
+  assert.match(result.stdout, /Type help to see available commands\./);
+});
+
+test('repl exit command exits cleanly', async () => {
+  const result = await runCli([], {input: '\nexit\n'});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Goodbye\./);
+});
+
+test('repl inspect reports metadata for a JPEG image', async () => {
+  const result = await runCli([], {input: `\ninspect ${sampleJpg}\nexit\n`});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Dimensions\s+100 × 100/);
+  assert.match(result.stdout, /Format\s+JPEG/);
+});
+
+test('repl inspect fails for a missing image', async () => {
+  const result = await runCli([], {input: '\ninspect missing-image.png\nexit\n'});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /File not found/);
+});
+
+test('repl inspect fails for a non-image file', async () => {
+  const result = await runCli([], {input: `\ninspect ${nonImage}\nexit\n`});
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Unsupported format|Corrupt or unreadable image/);
+});
+
+test('repl config list and set work with masked secrets', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-repl-home-'));
+
+  try {
+    const result = await runCli([], {
+      input: '\nconfig list\nconfig set OPENAI_API_KEY=sk-test-secret\nconfig list\nexit\n',
+      home
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /No config values set\./);
+    assert.match(result.stdout, /OPENAI_API_KEY saved to/);
+    assert.match(result.stdout, /OPENAI_API_KEY\s+sk\*+et/);
+
+    const configPath = path.join(home, '.cvkit', 'config.json');
+    const stored = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, string>;
+    assert.equal(stored.OPENAI_API_KEY, 'sk-test-secret');
+  } finally {
+    await rm(home, {recursive: true, force: true});
+  }
 });
 
 test('inspect reports metadata for a JPEG image', async () => {
