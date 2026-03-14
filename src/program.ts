@@ -4,6 +4,8 @@ import {registerInspect} from './commands/inspect.js';
 import {registerConfig} from './commands/config.js';
 import {registerDataset} from './commands/dataset.js';
 import {registerConvert} from './commands/convert.js';
+import {registerDescribe} from './commands/describe.js';
+import {registerAsk} from './commands/ask.js';
 
 export function buildCLI(): Command {
   const program = new Command();
@@ -18,6 +20,8 @@ export function buildCLI(): Command {
   registerConfig(program);
   registerDataset(program);
   registerConvert(program);
+  registerDescribe(program);
+  registerAsk(program);
 
   return program;
 }
