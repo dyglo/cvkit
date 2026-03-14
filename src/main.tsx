@@ -11,6 +11,7 @@ import {routeCommand} from './repl/router.js';
 import {Repl} from './repl/Repl.js';
 import {Banner} from './ui/Banner.js';
 import type {Workspace} from './lib/workspace.js';
+import type {ConfirmationRequest} from './repl/types.js';
 
 const BANNER_LINES = [
   ' ██████╗██╗   ██╗██╗  ██╗██╗████████╗',
@@ -75,11 +76,13 @@ async function runLineRepl(): Promise<void> {
     const workspace = await detectWorkspace();
     writeWorkspaceSummary(workspace);
     writePrompt(workspace);
+    let pendingConfirmation: ConfirmationRequest | null = null;
 
     for await (const line of iterator) {
       process.stdout.write(`${line}\n`);
 
-      const result = await routeCommand(line, workspace);
+      const result = await routeCommand(line, workspace, pendingConfirmation);
+      pendingConfirmation = result.type === 'confirm' ? result.request : null;
       const shouldContinue = await writeLineReplResult(result);
       if (!shouldContinue) {
         return;
@@ -111,6 +114,9 @@ async function writeLineReplResult(
       process.stdout.write(`\n${indentBlock(result.message)}\n\n`);
       return true;
     case 'error':
+      process.stdout.write(`\n${indentBlock(result.message)}\n\n`);
+      return true;
+    case 'confirm':
       process.stdout.write(`\n${indentBlock(result.message)}\n\n`);
       return true;
     case 'exit':
@@ -145,7 +151,7 @@ function formatWorkspaceSummary(workspace: Workspace): string {
   }
 
   lines.push('──────────────────────────────────────');
-  lines.push('Type help to see available commands.');
+  lines.push('Type help or / to see available commands.');
 
   return lines.join('\n');
 }
