@@ -4,8 +4,8 @@ import process from 'node:process';
 import {Command} from 'commander';
 import {createRun, finishRun, recordAnomalyRun} from '../lib/history.js';
 import {isSupportedImagePath} from '../lib/image.js';
-import {getOpenAIClient, VISION_MODEL} from '../lib/openai.js';
-import {imageToBase64} from '../lib/vision.js';
+import {getClient, VISION_MODEL} from '../lib/ai-client.js';
+import {imageToInlineData} from '../lib/vision.js';
 
 const ANOMALY_PROMPT = `You are a quality control assistant for computer vision datasets.
 Analyze this image and determine if it is anomalous or unsuitable for CV training.
@@ -58,7 +58,7 @@ export function registerAnomaly(program: Command): void {
         throw new Error(`No supported images found in ${dir}.`);
       }
 
-      const client = await Promise.resolve(getOpenAIClient());
+      const client = await Promise.resolve(getClient());
       const startedAt = Date.now();
       const runId = await safeCreateRun('anomaly');
       const results: AnomalyScanRow[] = [];
@@ -77,24 +77,28 @@ export function registerAnomaly(program: Command): void {
             )}] ${Math.round((current / imagePaths.length) * 100)}%\n`
           );
 
-          const base64 = imageToBase64(imagePath);
-          const response = await client.chat.completions.create({
+          const inlineData = imageToInlineData(imagePath);
+          const response = await client.models.generateContent({
             model: VISION_MODEL,
-            max_tokens: 150,
-            messages: [
+            contents: [
               {
                 role: 'user',
-                content: [
-                  {type: 'text', text: ANOMALY_PROMPT},
-                  {type: 'image_url', image_url: {url: base64}}
+                parts: [
+                  {text: ANOMALY_PROMPT},
+                  {
+                    inlineData
+                  }
                 ]
               }
-            ]
+            ],
+            config: {
+              maxOutputTokens: 150
+            }
           });
 
-          const raw = response.choices[0]?.message?.content ?? '';
+          const raw = response.text ?? '';
           const parsed = parseAnomalyResponse(raw);
-          const tokensUsed = response.usage?.total_tokens ?? 0;
+          const tokensUsed = response.usageMetadata?.totalTokenCount ?? 0;
           totalTokens += tokensUsed;
 
           results.push({

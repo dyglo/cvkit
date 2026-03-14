@@ -4,9 +4,9 @@ import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import type OpenAI from 'openai';
 import {describeDirectory} from '../src/commands/describe.js';
-import {setOpenAIClientFactoryForTests} from '../src/lib/openai.js';
+import type {AIClient} from '../src/lib/ai-client.js';
+import {setClientFactoryForTests} from '../src/lib/ai-client.js';
 import {imageToBase64} from '../src/lib/vision.js';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
@@ -20,14 +20,14 @@ test('imageToBase64 correctly encodes a PNG fixture', () => {
   assert.ok(encoded.length > 'data:image/png;base64,'.length);
 });
 
-test('describe errors cleanly when OPENAI_API_KEY is not set', async () => {
+test('describe errors cleanly when GEMINI_API_KEY is not set', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-phase3a-home-'));
 
   try {
     const result = await runCli(['describe', samplePng], {home});
     assert.equal(result.code, 1);
-    assert.match(result.stderr, /OpenAI API key not set/);
-    assert.match(result.stderr, /cvkit config set OPENAI_API_KEY=sk-\.\.\./);
+    assert.match(result.stderr, /Gemini API key not set/);
+    assert.match(result.stderr, /cvkit config set GEMINI_API_KEY=your-key/);
   } finally {
     await rm(home, {recursive: true, force: true});
   }
@@ -49,9 +49,9 @@ test('batch describe creates CSV with correct headers', async (t) => {
   const outputDir = await mkdtemp(path.join(os.tmpdir(), 'cvkit-phase3a-batch-'));
   const outputPath = path.join(outputDir, 'descriptions.csv');
 
-  setOpenAIClientFactoryForTests(() => createFakeOpenAIClient());
+  setClientFactoryForTests(() => createFakeAIClient());
   t.after(() => {
-    setOpenAIClientFactoryForTests(null);
+    setClientFactoryForTests(null);
   });
 
   try {
@@ -74,31 +74,22 @@ test('help output includes describe and ask', async () => {
   assert.match(result.stdout, /\bask\b/);
 });
 
-function createFakeOpenAIClient(): OpenAI {
+function createFakeAIClient(): AIClient {
   return {
-    chat: {
-      completions: {
-        create: async () => ({
-          model: 'gpt-5-mini-2025-08-07',
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  description: 'Synthetic scene for tests.',
-                  objects: ['person', 'car'],
-                  suggested_tasks: ['object detection', 'classification'],
-                  quality_notes: ['well lit']
-                })
-              }
-            }
-          ],
-          usage: {
-            total_tokens: 42
-          }
-        })
-      }
+    models: {
+      generateContent: async () => ({
+        text: JSON.stringify({
+          description: 'Synthetic scene for tests.',
+          objects: ['person', 'car'],
+          suggested_tasks: ['object detection', 'classification'],
+          quality_notes: ['well lit']
+        }),
+        usageMetadata: {
+          totalTokenCount: 42
+        }
+      })
     }
-  } as unknown as OpenAI;
+  };
 }
 
 function runCli(

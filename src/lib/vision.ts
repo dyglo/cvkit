@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import {readdir, stat} from 'node:fs/promises';
 import path from 'node:path';
-import {getOpenAIClient, normalizeOpenAIError, VISION_MODEL} from './openai.js';
+import {getClient, normalizeAIError, VISION_MODEL} from './ai-client.js';
 
 const SUPPORTED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'] as const;
 const SUPPORTED_FORMATS_LABEL = SUPPORTED_IMAGE_EXTENSIONS.join(', ');
@@ -25,6 +25,10 @@ export function imageToBase64(imagePath: string): string {
   const mime = mimeMap[ext] ?? 'image/jpeg';
   const data = fs.readFileSync(imagePath).toString('base64');
   return `data:${mime};base64,${data}`;
+}
+
+export function imageToInlineData(imagePath: string): {mimeType: string; data: string} {
+  return parseDataUrl(imageToBase64(imagePath));
 }
 
 export async function resolveVisionImage(imagePath: string): Promise<string> {
@@ -83,38 +87,52 @@ export async function callStructuredVision<T>({
   imagePath: string;
   prompt: string;
   maxTokens?: number;
+  responseSchema?: Record<string, unknown>;
 }): Promise<VisionCompletionResult<T>> {
   const resolvedImage = await resolveVisionImage(imagePath);
-  const client = await getOpenAIClient();
-  const base64 = imageToBase64(resolvedImage);
+  const client = await getClient();
+  const {mimeType, data} = imageToInlineData(resolvedImage);
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await client.models.generateContent({
       model: VISION_MODEL,
-      max_tokens: maxTokens,
-      messages: [
+      contents: [
         {
           role: 'user',
-          content: [
-            {type: 'text', text: prompt},
-            {type: 'image_url', image_url: {url: base64}}
+          parts: [
+            {text: prompt},
+            {
+              inlineData: {
+                mimeType,
+                data
+              }
+            }
           ]
         }
-      ]
+      ],
+      config: {
+        maxOutputTokens: maxTokens,
+        ...(responseSchema
+          ? {
+              responseMimeType: 'application/json',
+              responseJsonSchema: responseSchema
+            }
+          : {})
+      }
     });
 
-    const content = extractMessageText(response.choices[0]?.message?.content);
+    const content = response.text?.trim() ?? '';
     if (!content) {
       throw new Error('Empty response from model');
     }
 
     return {
       data: parseStructuredJson<T>(content),
-      model: response.model ?? VISION_MODEL,
-      tokensUsed: response.usage?.total_tokens ?? 0
+      model: VISION_MODEL,
+      tokensUsed: response.usageMetadata?.totalTokenCount ?? 0
     };
   } catch (error: unknown) {
-    if (error instanceof Error && error.message.startsWith('OpenAI API error:')) {
+    if (error instanceof Error && error.message.startsWith('Gemini API error:')) {
       throw error;
     }
 
@@ -122,7 +140,7 @@ export async function callStructuredVision<T>({
       throw error;
     }
 
-    throw normalizeOpenAIError(error);
+    throw normalizeAIError(error);
   }
 }
 
@@ -133,31 +151,6 @@ export function isSupportedVisionImage(filePath: string): boolean {
 
 export function getSupportedVisionFormatsLabel(): string {
   return SUPPORTED_FORMATS_LABEL;
-}
-
-function extractMessageText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        if (!item || typeof item !== 'object') {
-          return '';
-        }
-
-        if ('type' in item && item.type === 'text' && 'text' in item && typeof item.text === 'string') {
-          return item.text;
-        }
-
-        return '';
-      })
-      .join('\n')
-      .trim();
-  }
-
-  return '';
 }
 
 function parseStructuredJson<T>(content: string): T {
@@ -172,4 +165,16 @@ function parseStructuredJson<T>(content: string): T {
 
 function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code);
+}
+
+function parseDataUrl(dataUrl: string): {mimeType: string; data: string} {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error('Invalid image payload.');
+  }
+
+  return {
+    mimeType: match[1],
+    data: match[2]
+  };
 }

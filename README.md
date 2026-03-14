@@ -22,12 +22,12 @@ npm install -g cvkit
 ```bash
 cvkit
 cvkit inspect ./test/fixtures/sample.jpg
-cvkit config set OPENAI_API_KEY=sk-...
+cvkit config set GEMINI_API_KEY=your-key
 ```
 
 ## AI loop
 
-`cvkit` now supports natural-language prompts in the REPL. Direct commands still work as before, but non-command input is routed through the OpenAI Responses API with tool calling over the local workspace.
+`cvkit` now supports natural-language prompts in the REPL. Direct commands still work as before, but non-command input is routed through Gemini tool calling over the local workspace.
 
 Examples:
 
@@ -55,15 +55,16 @@ AI writes are gated. If the model wants to call `write_file` or `edit_file`, `cv
 Configuration lives in `~/.cvkit/config.json`.
 
 ```bash
-cvkit config set OPENAI_API_KEY=sk-...
-cvkit config set DEFAULT_MODEL=gpt-5-mini-2025-08-07
+cvkit config set GEMINI_API_KEY=your-key
+cvkit config set DEFAULT_MODEL=gemini-3-flash-preview
 cvkit config list
 ```
 
 AI credentials are resolved in this order:
 
-1. `OPENAI_API_KEY` from `~/.cvkit/config.json`
-2. `CVKIT_OPENAI_KEY` from the runtime environment or `.env`
+1. `GEMINI_API_KEY` from `~/.cvkit/config.json`
+2. `GEMINI_API_KEY` from the runtime environment or `.env`
+3. `CVKIT_GEMINI_KEY` from the runtime environment or `.env`
 
 Create a local `.env` from the example file when you want a shared runtime fallback without storing the key in user config:
 
@@ -107,11 +108,11 @@ docker compose up --build
 
 ## Cloud Run
 
-Deploy the HTTP wrapper to Cloud Run with authenticated access and a Secret Manager-backed OpenAI key:
+Deploy the HTTP wrapper to Cloud Run with authenticated access and a Secret Manager-backed Gemini key:
 
 ```bash
 chmod +x deploy/cloud-run.sh
-deploy/cloud-run.sh <project-id> <region> <openai-secret-name> [service-name] [secret-version]
+deploy/cloud-run.sh <project-id> <region> <gemini-secret-name> [service-name] [secret-version]
 ```
 
 ## Roadmap

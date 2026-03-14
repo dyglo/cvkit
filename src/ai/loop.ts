@@ -1,11 +1,5 @@
-import type OpenAI from 'openai';
-import type {
-  Response,
-  ResponseFunctionToolCall,
-  ResponseInputItem,
-  ResponseOutputItem
-} from 'openai/resources/responses/responses.js';
-import {PRIMARY_MODEL, getOpenAIClient} from '../lib/openai.js';
+import {FunctionCallingConfigMode} from '@google/genai';
+import {getClient, TEXT_MODEL, type AIClient, type AIContent, type AIResponse} from '../lib/ai-client.js';
 import type {Workspace} from '../lib/workspace.js';
 import {buildSystemPrompt} from './system-prompt.js';
 import {
@@ -38,12 +32,13 @@ export interface AILoopOptions {
 }
 
 export interface PendingAIToolCall {
-  responseId: string;
+  responseId: string | null;
   callId: string;
   toolName: AIToolName;
   args: AIToolArguments;
   prompt: string;
   nextIteration: number;
+  contents: AIContent[];
 }
 
 export type AILoopRunResult =
@@ -55,7 +50,7 @@ export type AILoopRunResult =
   | {
       status: 'confirmation_required';
       text: string;
-      responseId: string;
+      responseId: string | null;
       pending: PendingAIToolCall;
     };
 
@@ -74,14 +69,11 @@ export async function runAILoopSession(
   options: AILoopOptions
 ): Promise<AILoopRunResult> {
   options.onThinking('Thinking...');
-  const previousResponseId = findLatestResponseId(conversationHistory);
-  const input = buildInitialInput(userInput, conversationHistory, previousResponseId);
 
   return continueAILoop({
-    client: await getOpenAIClient(),
+    client: await getClient(),
     options,
-    previousResponseId,
-    input,
+    contents: buildInitialContents(userInput, conversationHistory),
     iterationStart: 0
   });
 }
@@ -92,9 +84,10 @@ export async function resumeAILoopAfterConfirmation(
   options: AILoopOptions
 ): Promise<AILoopRunResult> {
   options.onThinking('Thinking...');
-  const client = await getOpenAIClient();
-  let output: string;
+  const client = await getClient();
+  const currentContents = [...pending.contents];
 
+  let output: string;
   if (approved) {
     options.onThinking(describeAIToolCall(pending.toolName, pending.args));
     options.onToolCall(pending.toolName, pending.args);
@@ -104,17 +97,12 @@ export async function resumeAILoopAfterConfirmation(
     output = `User declined ${pending.toolName}.`;
   }
 
+  currentContents.push(createFunctionResponseContent(pending.callId, pending.toolName, {output}));
+
   return continueAILoop({
     client,
     options,
-    previousResponseId: pending.responseId,
-    input: [
-      {
-        type: 'function_call_output',
-        call_id: pending.callId,
-        output
-      } satisfies ResponseInputItem.FunctionCallOutput
-    ],
+    contents: currentContents,
     iterationStart: pending.nextIteration
   });
 }
@@ -122,80 +110,83 @@ export async function resumeAILoopAfterConfirmation(
 async function continueAILoop({
   client,
   options,
-  previousResponseId,
-  input,
+  contents,
   iterationStart
 }: {
-  client: OpenAI;
+  client: AIClient;
   options: AILoopOptions;
-  previousResponseId: string | null;
-  input: string | ResponseInputItem[];
+  contents: AIContent[];
   iterationStart: number;
 }): Promise<AILoopRunResult> {
-  let currentPreviousResponseId = previousResponseId;
-  let currentInput = input;
+  let currentContents = [...contents];
   const toolNames = options.toolNames ?? ALL_AI_TOOL_NAMES;
   const allowedTools = new Set<AIToolName>(toolNames);
 
   for (let iteration = iterationStart; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
     options.onThinking(iteration === 0 ? 'Thinking...' : 'Preparing response...');
-    const streamedChunks: string[] = [];
-    const stream = client.responses.stream({
-      model: PRIMARY_MODEL,
-      instructions: buildSystemPrompt(options.workspace, toolNames),
-      input: currentInput,
-      previous_response_id: currentPreviousResponseId ?? undefined,
-      parallel_tool_calls: false,
-      store: true,
-      tool_choice: 'auto',
-      tools: getToolSchemas(toolNames) as unknown as OpenAI.Responses.ResponseCreateParams['tools']
+    const response = await client.models.generateContent({
+      model: TEXT_MODEL,
+      contents: currentContents,
+      config: {
+        systemInstruction: buildSystemPrompt(options.workspace, toolNames),
+        toolConfig: {
+          functionCallingConfig: {
+            mode: FunctionCallingConfigMode.VALIDATED,
+            allowedFunctionNames: [...allowedTools]
+          }
+        },
+        tools: [
+          {
+            functionDeclarations: getToolSchemas(toolNames).map((schema) => ({
+              name: schema.name,
+              description: schema.description,
+              parametersJsonSchema: schema.parameters
+            }))
+          }
+        ]
+      }
     });
 
-    stream.on('response.output_text.delta', (event) => {
-      streamedChunks.push(event.delta);
-      options.onOutput(event.delta);
-    });
-
-    const response = await stream.finalResponse();
-    currentPreviousResponseId = response.id;
-
-    const functionCall = findFunctionCall(response.output);
+    const functionCall = findFunctionCall(response);
     if (!functionCall) {
-      const text = streamedChunks.join('') || extractResponseText(response);
-      if (!streamedChunks.length && text) {
+      const text = extractResponseText(response);
+      if (text) {
         options.onOutput(text);
       }
 
       return {
         status: 'completed',
         text,
-        responseId: response.id
+        responseId: null
       };
     }
 
-    if (!isAIToolName(functionCall.name) || !allowedTools.has(functionCall.name)) {
-      const message = `Model requested unavailable tool: ${functionCall.name}.`;
+    if (!functionCall.name || !isAIToolName(functionCall.name) || !allowedTools.has(functionCall.name)) {
+      const message = `Model requested unavailable tool: ${functionCall.name ?? 'unknown'}.`;
       options.onOutput(message);
       return {
         status: 'completed',
         text: message,
-        responseId: response.id
+        responseId: null
       };
     }
 
-    const parsedArgs = parseAIToolArguments(functionCall.name, functionCall.arguments);
+    const parsedArgs = parseAIToolArguments(functionCall.name, JSON.stringify(functionCall.args ?? {}));
+    currentContents = [...currentContents, createModelResponseContent(response, functionCall)];
+
     if (isMutatingAITool(functionCall.name)) {
       return {
         status: 'confirmation_required',
         text: formatAIToolConfirmation(functionCall.name, parsedArgs),
-        responseId: response.id,
+        responseId: null,
         pending: {
-          responseId: response.id,
-          callId: functionCall.call_id,
+          responseId: null,
+          callId: functionCall.callId,
           toolName: functionCall.name,
           args: parsedArgs,
           prompt: formatAIToolConfirmation(functionCall.name, parsedArgs),
-          nextIteration: iteration + 1
+          nextIteration: iteration + 1,
+          contents: currentContents
         }
       };
     }
@@ -203,13 +194,11 @@ async function continueAILoop({
     options.onThinking(describeAIToolCall(functionCall.name, parsedArgs));
     options.onToolCall(functionCall.name, parsedArgs);
     const toolResult = await executeAITool(functionCall.name, parsedArgs, options.workspace);
-    currentInput = [
-      {
-        type: 'function_call_output',
-        call_id: functionCall.call_id,
+    currentContents.push(
+      createFunctionResponseContent(functionCall.callId, functionCall.name, {
         output: toFunctionCallOutput(toolResult)
-      } satisfies ResponseInputItem.FunctionCallOutput
-    ];
+      })
+    );
   }
 
   const message = `AI loop stopped after ${MAX_TOOL_ITERATIONS} tool iterations.`;
@@ -217,67 +206,89 @@ async function continueAILoop({
   return {
     status: 'completed',
     text: message,
-    responseId: currentPreviousResponseId
+    responseId: null
   };
 }
 
-function findLatestResponseId(history: ConversationMessage[]): string | null {
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const responseId = history[index]?.responseId;
-    if (responseId) {
-      return responseId;
-    }
-  }
-
-  return null;
-}
-
-function buildInitialInput(
+function buildInitialContents(
   userInput: string,
-  conversationHistory: ConversationMessage[],
-  previousResponseId: string | null
-): string {
-  if (previousResponseId) {
-    return userInput;
-  }
+  conversationHistory: ConversationMessage[]
+): AIContent[] {
+  const contents = conversationHistory.map((message) => ({
+    role: message.role === 'assistant' ? 'model' : 'user',
+    parts: [{text: message.content}]
+  })) satisfies AIContent[];
 
-  if (conversationHistory.length === 0) {
-    return userInput;
-  }
+  contents.push({
+    role: 'user',
+    parts: [{text: userInput}]
+  });
 
-  const transcript = conversationHistory
-    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
-    .join('\n\n');
-
-  return ['Recent conversation:', transcript, '', `Current request: ${userInput}`].join('\n');
+  return contents;
 }
 
-function extractResponseText(response: Response): string {
-  const chunks: string[] = [];
+function extractResponseText(response: AIResponse): string {
+  return response.text?.trim() ?? '';
+}
 
-  for (const item of response.output) {
-    if (item.type !== 'message') {
-      continue;
-    }
+function findFunctionCall(
+  response: AIResponse
+): {callId: string; name: string; args: Record<string, unknown>} | null {
+  const functionCall = response.functionCalls?.[0];
+  if (!functionCall?.name) {
+    return null;
+  }
 
-    for (const part of item.content) {
-      if (part.type === 'output_text' && part.text) {
-        chunks.push(part.text);
+  return {
+    callId: functionCall.id ?? `${functionCall.name}-call`,
+    name: functionCall.name,
+    args: functionCall.args ?? {}
+  };
+}
+
+function createModelResponseContent(
+  response: AIResponse,
+  functionCall: {callId: string; name: string; args: Record<string, unknown>}
+): AIContent {
+  const parts = response.candidates?.[0]?.content?.parts;
+  if (parts && parts.length > 0) {
+    return {
+      role: 'model',
+      parts
+    };
+  }
+
+  return {
+    role: 'model',
+    parts: [
+      {
+        functionCall: {
+          id: functionCall.callId,
+          name: functionCall.name,
+          args: functionCall.args
+        }
       }
-    }
-  }
-
-  return chunks.join('').trim();
+    ]
+  };
 }
 
-function findFunctionCall(outputItems: ResponseOutputItem[]): ResponseFunctionToolCall | null {
-  for (const item of outputItems) {
-    if (item.type === 'function_call') {
-      return item;
-    }
-  }
-
-  return null;
+function createFunctionResponseContent(
+  callId: string,
+  name: string,
+  response: Record<string, unknown>
+): AIContent {
+  return {
+    role: 'user',
+    parts: [
+      {
+        functionResponse: {
+          id: callId,
+          name,
+          response
+        }
+      }
+    ]
+  };
 }
 
 function toFunctionCallOutput(result: {status: string; output: string; error?: string}): string {

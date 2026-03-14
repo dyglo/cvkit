@@ -3,9 +3,9 @@ set -eu
 
 PROJECT_ID="${1:-your-project-id}"
 REGION="${2:-us-central1}"
-OPENAI_SECRET_NAME="${3:-cvkit-openai-key}"
+GEMINI_SECRET_NAME="${3:-cvkit-gemini-key}"
 SERVICE_NAME="${4:-cvkit}"
-OPENAI_SECRET_VERSION="${5:-latest}"
+GEMINI_SECRET_VERSION="${5:-latest}"
 IMAGE="gcr.io/${PROJECT_ID}/cvkit:latest"
 
 echo "Building Docker image..."
@@ -20,7 +20,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --platform managed \
   --region "${REGION}" \
   --no-allow-unauthenticated \
-  --set-secrets "CVKIT_OPENAI_KEY=${OPENAI_SECRET_NAME}:${OPENAI_SECRET_VERSION}" \
+  --set-secrets "CVKIT_GEMINI_KEY=${GEMINI_SECRET_NAME}:${GEMINI_SECRET_VERSION}" \
   --memory 1Gi \
   --cpu 1 \
   --port 8080
