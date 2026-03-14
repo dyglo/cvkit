@@ -1,9 +1,9 @@
-// Model strings verified at https://platform.openai.com/docs/models
-// Always verify these before use — OpenAI updates model names frequently
+// Model strings verified at https://ai.google.dev/gemini-api/docs/models
+// Always verify these before use — Gemini preview model names can change frequently.
 export const MODELS = {
-  NANO: 'gpt-5-nano-2025-08-07',
-  MINI: 'gpt-5-mini-2025-08-07',
-  POWER: 'gpt-5.4'
+  FLASH_PREVIEW: 'gemini-3-flash-preview',
+  FLASH: 'gemini-2.5-flash',
+  PRO: 'gemini-2.5-pro'
 } as const;
 
 export type ModelKey = keyof typeof MODELS;

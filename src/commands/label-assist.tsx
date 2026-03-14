@@ -4,8 +4,8 @@ import process from 'node:process';
 import {Command} from 'commander';
 import {createRun, finishRun, recordLabelAssistRun} from '../lib/history.js';
 import {inspectImage} from '../lib/image.js';
-import {getOpenAIClient, VISION_MODEL} from '../lib/openai.js';
-import {imageToBase64} from '../lib/vision.js';
+import {getClient, VISION_MODEL} from '../lib/ai-client.js';
+import {imageToInlineData} from '../lib/vision.js';
 
 const LABEL_ASSIST_PROMPT = `You are a CV annotation assistant.
 Suggest bounding box annotations for these classes: {classes}
@@ -65,30 +65,33 @@ export function registerLabelAssist(program: Command): void {
       }
 
       await inspectImage(resolvedImagePath);
-      const client = await Promise.resolve(getOpenAIClient());
+      const client = await Promise.resolve(getClient());
       const startedAt = Date.now();
       const runId = await safeCreateRun('label-assist');
 
       try {
-        const base64 = imageToBase64(resolvedImagePath);
-        const response = await client.chat.completions.create({
+        const inlineData = imageToInlineData(resolvedImagePath);
+        const response = await client.models.generateContent({
           model: VISION_MODEL,
-          max_tokens: 500,
-          messages: [
+          contents: [
             {
               role: 'user',
-              content: [
+              parts: [
                 {
-                  type: 'text',
                   text: LABEL_ASSIST_PROMPT.replace('{classes}', classes.join(', '))
                 },
-                {type: 'image_url', image_url: {url: base64}}
+                {
+                  inlineData
+                }
               ]
             }
-          ]
+          ],
+          config: {
+            maxOutputTokens: 500
+          }
         });
 
-        const content = response.choices[0]?.message?.content ?? '';
+        const content = response.text ?? '';
         const parsed = parseLabelAssistResponse(content);
         const renderedLines = renderLabelAssistLines(parsed, classes);
         const savePath = options.save ? path.resolve(options.save) : undefined;
@@ -108,7 +111,7 @@ export function registerLabelAssist(program: Command): void {
             classes,
             renderedLines,
             savePath,
-            response.usage?.total_tokens ?? 0
+            response.usageMetadata?.totalTokenCount ?? 0
           )
         );
 
@@ -123,7 +126,7 @@ export function registerLabelAssist(program: Command): void {
               line.note ? `class: ${line.className}, confidence: ${line.confidence}, note: ${line.note}` : ''
             )
             .filter(Boolean),
-          tokensUsed: response.usage?.total_tokens ?? 0
+          tokensUsed: response.usageMetadata?.totalTokenCount ?? 0
         });
         await safeFinishRun(runId, 'success', Date.now() - startedAt);
       } catch (error: unknown) {

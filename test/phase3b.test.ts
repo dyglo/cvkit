@@ -17,7 +17,7 @@ const projectRoot = path.resolve(import.meta.dirname, '..');
 const cliEntry = path.join(projectRoot, 'src', 'cli.ts');
 const sampleImage = path.join(projectRoot, 'test', 'fixtures', 'sample.png');
 
-test('anomaly errors cleanly when OPENAI_API_KEY not set', async () => {
+test('anomaly errors cleanly when GEMINI_API_KEY not set', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-home-'));
   const imageDir = await mkdtemp(path.join(os.tmpdir(), 'cvkit-anomaly-'));
 
@@ -26,7 +26,7 @@ test('anomaly errors cleanly when OPENAI_API_KEY not set', async () => {
     const result = await runCli(['anomaly', imageDir], {home});
 
     assert.equal(result.code, 1);
-    assert.match(result.stderr, /OpenAI API key not set/);
+    assert.match(result.stderr, /Gemini API key not set/);
   } finally {
     await safeCleanup(home);
     await safeCleanup(imageDir);
@@ -183,11 +183,11 @@ test('loadConfig remains compatible with config set/list storage', async () => {
   process.env.USERPROFILE = home;
 
   try {
-    await setConfigValue('OPENAI_API_KEY', 'sk-test');
+    await setConfigValue('GEMINI_API_KEY', 'gemini-test');
     await setConfigValue('DATABASE_URL', 'postgresql://localhost:5432/cvkit');
 
     const config = loadConfig();
-    assert.equal(config.OPENAI_API_KEY, 'sk-test');
+    assert.equal(config.GEMINI_API_KEY, 'gemini-test');
     assert.equal(config.DATABASE_URL, 'postgresql://localhost:5432/cvkit');
   } finally {
     restoreEnv('HOME', originalHome);

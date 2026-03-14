@@ -5,17 +5,17 @@ import os from 'node:os';
 import path from 'node:path';
 import {runAILoopSession, type ConversationMessage} from '../src/ai/loop.js';
 import {READ_ONLY_AI_TOOL_NAMES} from '../src/ai/tools.js';
-import {getOpenAIClient, setOpenAIClientFactoryForTests} from '../src/lib/openai.js';
+import {getClient, setClientFactoryForTests} from '../src/lib/ai-client.js';
 import {routeCommand} from '../src/repl/router.js';
 import type {Workspace} from '../src/lib/workspace.js';
 import {
   MockResponsesController,
   createFunctionCallResponse,
   createMessageResponse
-} from './helpers/fake-openai.js';
+} from './helpers/fake-ai-client.js';
 
 test.afterEach(() => {
-  setOpenAIClientFactoryForTests(null);
+  setClientFactoryForTests(null);
 });
 
 test('natural language input is routed to the AI loop', async () => {
@@ -43,12 +43,12 @@ test('AI loop calls glob_files for jpg discovery requests', async (t) => {
   });
   const workspace = createWorkspace(workspaceDir);
   const controller = new MockResponsesController([
-    createFunctionCallResponse('resp-1', 'call-1', 'glob_files', {pattern: '**/*.jpg'}),
-    createMessageResponse('resp-2', 'Found 2 JPG files.', ['Found ', '2 JPG files.'])
+    createFunctionCallResponse('call-1', 'glob_files', {pattern: '**/*.jpg'}),
+    createMessageResponse('Found 2 JPG files.')
   ]);
   const toolCalls: Array<{tool: string; args: unknown}> = [];
 
-  setOpenAIClientFactoryForTests(() => controller.createClient());
+  setClientFactoryForTests(() => controller.createClient());
   t.after(async () => {
     await rm(workspaceDir, {recursive: true, force: true});
   });
@@ -77,16 +77,16 @@ test('AI loop handles tool errors and continues to a final response', async (t) 
   const workspace = createWorkspace(workspaceDir);
   const controller = new MockResponsesController((body, index) => {
     if (index === 0) {
-      return createFunctionCallResponse('resp-1', 'call-1', 'read_file', {path: 'missing.txt'});
+      return createFunctionCallResponse('call-1', 'read_file', {path: 'missing.txt'});
     }
 
-    assert.equal(body.previous_response_id, 'resp-1');
-    const input = body.input as Array<{type: string; output: string}>;
-    assert.match(input[0]?.output ?? '', /Tool status: not-found/);
-    return createMessageResponse('resp-2', 'I could not read missing.txt because it does not exist.');
+    const contents = body.contents as Array<{parts?: Array<{functionResponse?: {response?: {output?: string}}}>}>;
+    const functionResponse = contents.at(-1)?.parts?.[0]?.functionResponse?.response;
+    assert.match(String(functionResponse?.output ?? ''), /Tool status: not-found/);
+    return createMessageResponse('I could not read missing.txt because it does not exist.');
   });
 
-  setOpenAIClientFactoryForTests(() => controller.createClient());
+  setClientFactoryForTests(() => controller.createClient());
   t.after(async () => {
     await rm(workspaceDir, {recursive: true, force: true});
   });
@@ -112,10 +112,10 @@ test('AI loop stops after 10 iterations', async (t) => {
   const workspaceDir = await createWorkspaceDir();
   const workspace = createWorkspace(workspaceDir);
   const controller = new MockResponsesController((_, index) =>
-    createFunctionCallResponse(`resp-${index + 1}`, `call-${index + 1}`, 'list_dir', {path: '.'})
+    createFunctionCallResponse(`call-${index + 1}`, 'list_dir', {path: '.'})
   );
 
-  setOpenAIClientFactoryForTests(() => controller.createClient());
+  setClientFactoryForTests(() => controller.createClient());
   t.after(async () => {
     await rm(workspaceDir, {recursive: true, force: true});
   });
@@ -137,20 +137,26 @@ test('AI loop stops after 10 iterations', async (t) => {
   assert.match(result.text, /stopped after 10 tool iterations/i);
 });
 
-test('conversation history uses previous_response_id across turns', async (t) => {
+test('conversation history is replayed into Gemini contents across turns', async (t) => {
   const workspaceDir = await createWorkspaceDir();
   const workspace = createWorkspace(workspaceDir);
   const controller = new MockResponsesController((body, index) => {
     if (index === 0) {
-      assert.equal(body.previous_response_id, undefined);
-      return createMessageResponse('resp-1', 'First answer.');
+      const contents = body.contents as Array<{role?: string; parts?: Array<{text?: string}>}>;
+      assert.equal(contents.length, 1);
+      assert.equal(contents[0]?.parts?.[0]?.text, 'first question');
+      return createMessageResponse('First answer.');
     }
 
-    assert.equal(body.previous_response_id, 'resp-1');
-    return createMessageResponse('resp-2', 'Second answer.');
+    const contents = body.contents as Array<{role?: string; parts?: Array<{text?: string}>}>;
+    assert.equal(contents.length, 3);
+    assert.equal(contents[0]?.role, 'user');
+    assert.equal(contents[1]?.role, 'model');
+    assert.equal(contents[2]?.parts?.[0]?.text, 'second question');
+    return createMessageResponse('Second answer.');
   });
 
-  setOpenAIClientFactoryForTests(() => controller.createClient());
+  setClientFactoryForTests(() => controller.createClient());
   t.after(async () => {
     await rm(workspaceDir, {recursive: true, force: true});
   });
@@ -202,12 +208,12 @@ test('thinking updates include the tool name being executed', async (t) => {
   });
   const workspace = createWorkspace(workspaceDir);
   const controller = new MockResponsesController([
-    createFunctionCallResponse('resp-1', 'call-1', 'glob_files', {pattern: '**/*.jpg'}),
-    createMessageResponse('resp-2', 'Done.')
+    createFunctionCallResponse('call-1', 'glob_files', {pattern: '**/*.jpg'}),
+    createMessageResponse('Done.')
   ]);
   const statuses: string[] = [];
 
-  setOpenAIClientFactoryForTests(() => controller.createClient());
+  setClientFactoryForTests(() => controller.createClient());
   t.after(async () => {
     await rm(workspaceDir, {recursive: true, force: true});
   });
@@ -233,14 +239,14 @@ test('read-only AI sessions reject unavailable mutating tools', async (t) => {
   const workspaceDir = await createWorkspaceDir();
   const workspace = createWorkspace(workspaceDir);
   const controller = new MockResponsesController([
-    createFunctionCallResponse('resp-1', 'call-1', 'write_file', {
+    createFunctionCallResponse('call-1', 'write_file', {
       path: 'labels/new.txt',
       content: 'hello'
     })
   ]);
   const output: string[] = [];
 
-  setOpenAIClientFactoryForTests(() => controller.createClient());
+  setClientFactoryForTests(() => controller.createClient());
   t.after(async () => {
     await rm(workspaceDir, {recursive: true, force: true});
   });
@@ -264,19 +270,19 @@ test('read-only AI sessions reject unavailable mutating tools', async (t) => {
   assert.deepEqual(output, ['Model requested unavailable tool: write_file.']);
 });
 
-test('getOpenAIClient uses CVKIT_OPENAI_KEY when no user key is configured', async () => {
+test('getClient uses CVKIT_GEMINI_KEY when no user key is configured', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-ai-home-'));
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;
-  const originalEnvKey = process.env.CVKIT_OPENAI_KEY;
+  const originalEnvKey = process.env.CVKIT_GEMINI_KEY;
 
   process.env.HOME = home;
   process.env.USERPROFILE = home;
-  process.env.CVKIT_OPENAI_KEY = 'sk-env-fallback';
-  setOpenAIClientFactoryForTests(null);
+  process.env.CVKIT_GEMINI_KEY = 'gemini-env-fallback';
+  setClientFactoryForTests(null);
 
   try {
-    const client = await getOpenAIClient();
+    const client = await getClient();
     assert.ok(client);
   } finally {
     if (originalHome === undefined) {
@@ -292,9 +298,56 @@ test('getOpenAIClient uses CVKIT_OPENAI_KEY when no user key is configured', asy
     }
 
     if (originalEnvKey === undefined) {
-      delete process.env.CVKIT_OPENAI_KEY;
+      delete process.env.CVKIT_GEMINI_KEY;
     } else {
-      process.env.CVKIT_OPENAI_KEY = originalEnvKey;
+      process.env.CVKIT_GEMINI_KEY = originalEnvKey;
+    }
+
+    await rm(home, {recursive: true, force: true});
+  }
+});
+
+test('getClient retries after an initial missing-key failure in the same session', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-ai-retry-home-'));
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+  const originalFallbackKey = process.env.CVKIT_GEMINI_KEY;
+
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.CVKIT_GEMINI_KEY;
+  setClientFactoryForTests(null);
+
+  try {
+    await assert.rejects(() => getClient(), /Gemini API key not set/);
+    process.env.CVKIT_GEMINI_KEY = 'gemini-env-fallback';
+    const client = await getClient();
+    assert.ok(client);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+
+    if (originalGeminiKey === undefined) {
+      delete process.env.GEMINI_API_KEY;
+    } else {
+      process.env.GEMINI_API_KEY = originalGeminiKey;
+    }
+
+    if (originalFallbackKey === undefined) {
+      delete process.env.CVKIT_GEMINI_KEY;
+    } else {
+      process.env.CVKIT_GEMINI_KEY = originalFallbackKey;
     }
 
     await rm(home, {recursive: true, force: true});

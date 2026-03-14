@@ -5,12 +5,12 @@ import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createAppServer} from '../src/server.js';
-import {setOpenAIClientFactoryForTests} from '../src/lib/openai.js';
+import {setClientFactoryForTests} from '../src/lib/ai-client.js';
 import {resetWorkspaceCacheForTests} from '../src/lib/workspace.js';
-import {MockResponsesController, createMessageResponse} from './helpers/fake-openai.js';
+import {MockResponsesController, createMessageResponse} from './helpers/fake-ai-client.js';
 
 test.afterEach(() => {
-  setOpenAIClientFactoryForTests(null);
+  setClientFactoryForTests(null);
 });
 
 test('GET /health returns status and version', async () => {
@@ -40,11 +40,9 @@ test('POST /v1/ai/respond returns AI output', async (t) => {
   resetWorkspaceCacheForTests();
   await mkdir(path.join(workspaceDir, 'images'), {recursive: true});
 
-  const controller = new MockResponsesController([
-    createMessageResponse('resp-1', 'Server response.', ['Server ', 'response.'])
-  ]);
+  const controller = new MockResponsesController([createMessageResponse('Server response.')]);
 
-  setOpenAIClientFactoryForTests(() => controller.createClient());
+  setClientFactoryForTests(() => controller.createClient());
   t.after(async () => {
     process.chdir(originalCwd);
     resetWorkspaceCacheForTests();
@@ -71,10 +69,12 @@ test('POST /v1/ai/respond returns AI output', async (t) => {
     const payload = (await response.json()) as Record<string, unknown>;
     assert.equal(payload.status, 'completed');
     assert.equal(payload.output, 'Server response.');
-    assert.equal(payload.responseId, 'resp-1');
+    assert.equal(payload.responseId, null);
 
-    const requestBody = controller.requests[0] as {tools?: Array<{name?: string}>};
-    const toolNames = (requestBody.tools ?? []).map((tool) => tool.name);
+    const requestBody = controller.requests[0] as {
+      config?: {tools?: Array<{functionDeclarations?: Array<{name?: string}>}>};
+    };
+    const toolNames = (requestBody.config?.tools?.[0]?.functionDeclarations ?? []).map((tool) => tool.name);
     assert.deepEqual(toolNames, [
       'read_file',
       'glob_files',

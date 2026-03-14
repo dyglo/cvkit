@@ -106,18 +106,18 @@ test('repl config list and set work with masked secrets', async () => {
 
   try {
     const result = await runCli([], {
-      input: '\nconfig list\nconfig set OPENAI_API_KEY=sk-test-secret\nconfig list\nexit\n',
+      input: '\nconfig list\nconfig set GEMINI_API_KEY=gemini-test-secret\nconfig list\nexit\n',
       home
     });
 
     assert.equal(result.code, 0);
     assert.match(result.stdout, /No config values set\./);
-    assert.match(result.stdout, /OPENAI_API_KEY saved to/);
-    assert.match(result.stdout, /OPENAI_API_KEY\s+sk\*+et/);
+    assert.match(result.stdout, /GEMINI_API_KEY saved to/);
+    assert.match(result.stdout, /GEMINI_API_KEY\s+ge\*+et/);
 
     const configPath = path.join(home, '.cvkit', 'config.json');
     const stored = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, string>;
-    assert.equal(stored.OPENAI_API_KEY, 'sk-test-secret');
+    assert.equal(stored.GEMINI_API_KEY, 'gemini-test-secret');
   } finally {
     await rm(home, {recursive: true, force: true});
   }
@@ -519,17 +519,17 @@ test('config set creates config file and config list masks secrets', async () =>
     assert.equal(result.code, 0);
     assert.match(result.stdout, /No config values set\./);
 
-    result = await runCli(['config', 'set', 'OPENAI_API_KEY=sk-example-secret'], {home});
+    result = await runCli(['config', 'set', 'GEMINI_API_KEY=gemini-example-secret'], {home});
     assert.equal(result.code, 0);
 
     result = await runCli(['config', 'list'], {home});
     assert.equal(result.code, 0);
-    assert.match(result.stdout, /OPENAI_API_KEY/);
-    assert.doesNotMatch(result.stdout, /sk-example-secret/);
+    assert.match(result.stdout, /GEMINI_API_KEY/);
+    assert.doesNotMatch(result.stdout, /gemini-example-secret/);
 
     const configPath = path.join(home, '.cvkit', 'config.json');
     const stored = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, string>;
-    assert.equal(stored.OPENAI_API_KEY, 'sk-example-secret');
+    assert.equal(stored.GEMINI_API_KEY, 'gemini-example-secret');
   } finally {
     await rm(home, {recursive: true, force: true});
   }

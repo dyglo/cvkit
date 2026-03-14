@@ -8,7 +8,7 @@ import {maskConfigValue} from '../src/lib/config.js';
 import {splitDataset, validateDataset} from '../src/lib/dataset.js';
 
 test('maskConfigValue does not leak short secrets', () => {
-  const masked = maskConfigValue('OPENAI_API_KEY', 'sk-test');
+  const masked = maskConfigValue('GEMINI_API_KEY', 'gemini-test');
   assert.notEqual(masked, 'sk-test');
   assert.doesNotMatch(masked, /sk-test/);
 });
