@@ -77,7 +77,7 @@ export function registerDescribe(program: Command): void {
     .option('--output <path>', 'CSV output path for directory mode')
     .action(async (imagePathOrDir: string, options: DescribeOptions) => {
       const resolvedPath = path.resolve(imagePathOrDir);
-      const stats = await import('node:fs/promises').then((fs) => fs.stat(resolvedPath)).catch((error: unknown) => {
+      const stats = await stat(resolvedPath).catch((error: unknown) => {
         if (isErrno(error, 'ENOENT')) {
           throw new Error(`Path not found: ${imagePathOrDir}`);
         }
