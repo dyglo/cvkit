@@ -8,6 +8,7 @@
   },
   "files": [
     "dist",
+    "migrations",
     "README.md",
     "LICENSE",
     "workers"
@@ -37,11 +38,14 @@
     "chalk": "5.6.2",
     "commander": "14.0.3",
     "ink": "6.8.0",
+    "openai": "6.29.0",
+    "pg": "8.20.0",
     "react": "19.2.4",
     "sharp": "0.34.5"
   },
   "devDependencies": {
     "@types/node": "25.5.0",
+    "@types/pg": "8.18.0",
     "@types/react": "19.2.14",
     "tsup": "8.5.1",
     "tsx": "4.21.0",
