@@ -44,8 +44,6 @@ type AnomalyScanRow = ParsedAnomalyResult & {
   tokensUsed: number;
 };
 
-type FlaggedAnomalyRow = Extract<AnomalyScanRow, {status: 'ok'; isAnomaly: true}>;
-
 export function registerAnomaly(program: Command): void {
   program
     .command('anomaly')
@@ -224,12 +222,19 @@ function formatAnomalySummary(
   csvName: string,
   totalTokens: number
 ): string {
-  const anomalies = results.filter((result) => result.status === 'ok' && result.isAnomaly);
+  const anomalies = results.filter(
+    (
+      result
+    ): result is AnomalyScanRow & {
+      status: 'ok';
+      isAnomaly: true;
+      confidence: AnomalyThreshold;
+      reason: string | null;
+    } => result.status === 'ok' && result.isAnomaly
+  );
   const clean = results.filter((result) => result.status === 'ok' && !result.isAnomaly);
   const unknown = results.filter((result) => result.status === 'unknown');
-  const flagged = anomalies.filter((result): result is FlaggedAnomalyRow =>
-    shouldIncludeFlagged(result.confidence, threshold)
-  );
+  const flagged = anomalies.filter((result) => shouldIncludeFlagged(result.confidence, threshold));
   const anomalyPercent = results.length === 0 ? '0.0' : ((anomalies.length / results.length) * 100).toFixed(1);
   const lines = [
     '  Results',
