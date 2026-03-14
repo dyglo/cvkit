@@ -4,7 +4,7 @@ import {InputBar} from './InputBar.js';
 import {MessageList} from './MessageList.js';
 import {StatusBar} from './StatusBar.js';
 import {routeCommand} from './router.js';
-import type {Message} from './types.js';
+import type {ConfirmationRequest, Message} from './types.js';
 import type {Workspace} from '../lib/workspace.js';
 
 const MAX_MESSAGES = 50;
@@ -20,6 +20,7 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [draftInput, setDraftInput] = useState('');
   const [exitMessage, setExitMessage] = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<ConfirmationRequest | null>(null);
   const historyNavigationRef = useRef(false);
 
   useInput(
@@ -125,18 +126,26 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
     setThinking(true);
 
     try {
-      const result = await routeCommand(trimmed, workspace);
+      const result = await routeCommand(trimmed, workspace, pendingConfirmation);
 
       switch (result.type) {
         case 'empty':
+          setPendingConfirmation(null);
           break;
         case 'output':
+          setPendingConfirmation(null);
           setMessages((current) => appendMessage(current, createMessage('output', result.message)));
           break;
         case 'error':
+          setPendingConfirmation(null);
           setMessages((current) => appendMessage(current, createMessage('error', result.message)));
           break;
+        case 'confirm':
+          setPendingConfirmation(result.request);
+          setMessages((current) => appendMessage(current, createMessage('output', result.message)));
+          break;
         case 'exit':
+          setPendingConfirmation(null);
           triggerExit(result.message);
           return;
       }
@@ -205,7 +214,7 @@ function WorkspaceHeader({workspace}: {workspace: Workspace}): React.JSX.Element
         <Text key={line}>{`  ${line}`}</Text>
       ))}
       <Text>{`  ${SUMMARY_SEPARATOR}`}</Text>
-      <Text>  Type help to see available commands.</Text>
+      <Text>  Type help or / to see available commands.</Text>
     </Box>
   );
 }

@@ -26,7 +26,7 @@ export function resolvePath(input: string, cwd: string): string {
     return input;
   }
 
-  const matches = workspace.imageFiles
+  const matches = workspace.allFiles
     .filter((filePath) => path.posix.basename(filePath) === trimmed)
     .sort(compareWorkspaceMatches);
 

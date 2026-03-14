@@ -4,6 +4,7 @@ import path from 'node:path';
 export interface Workspace {
   cwd: string;
   name: string;
+  allFiles: string[];
   imageFiles: string[];
   labelFiles: string[];
   totalImages: number;
@@ -44,17 +45,20 @@ export function resetWorkspaceCacheForTests(): void {
 }
 
 async function createWorkspace(cwd: string): Promise<Workspace> {
+  const allFiles: string[] = [];
   const imageFiles: string[] = [];
   const labelFiles: string[] = [];
 
-  await walkDirectory(cwd, cwd, imageFiles, labelFiles);
+  await walkDirectory(cwd, cwd, allFiles, imageFiles, labelFiles);
 
+  allFiles.sort(compareWorkspacePaths);
   imageFiles.sort(compareWorkspacePaths);
   labelFiles.sort(compareWorkspacePaths);
 
   return {
     cwd,
     name: path.basename(cwd) || cwd,
+    allFiles,
     imageFiles,
     labelFiles,
     totalImages: imageFiles.length
@@ -64,6 +68,7 @@ async function createWorkspace(cwd: string): Promise<Workspace> {
 async function walkDirectory(
   directory: string,
   root: string,
+  allFiles: string[],
   imageFiles: string[],
   labelFiles: string[]
 ): Promise<void> {
@@ -77,7 +82,7 @@ async function walkDirectory(
         continue;
       }
 
-      await walkDirectory(fullPath, root, imageFiles, labelFiles);
+      await walkDirectory(fullPath, root, allFiles, imageFiles, labelFiles);
       continue;
     }
 
@@ -87,6 +92,7 @@ async function walkDirectory(
 
     const extension = path.extname(entry.name).toLowerCase();
     const relativePath = toWorkspacePath(path.relative(root, fullPath));
+    allFiles.push(relativePath);
 
     if (IMAGE_EXTENSIONS.has(extension)) {
       imageFiles.push(relativePath);

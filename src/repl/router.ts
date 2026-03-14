@@ -1,3 +1,4 @@
+import {stat} from 'node:fs/promises';
 import path from 'node:path';
 import {formatBytes, inspectImage} from '../lib/image.js';
 import {resolvePath} from '../lib/resolve.js';
@@ -9,11 +10,14 @@ import {
   setConfigValue
 } from '../lib/config.js';
 import type {Workspace} from '../lib/workspace.js';
-import type {CommandResult, ImageListItem} from './types.js';
+import {editFile, globFiles, grepFiles, listDir, readFile, writeFile} from '../tools/index.js';
+import type {ToolResult} from '../tools/index.js';
+import type {CommandResult, ConfirmationRequest, ImageListItem} from './types.js';
 
 const HELP_TEXT = [
   'Available commands',
   '──────────────────────────────────────────────',
+  '/                        Show slash tool menu',
   'inspect <path>           Inspect image metadata',
   'ls [subdir]              List images and labels',
   'pwd                      Show working directory',
@@ -21,17 +25,45 @@ const HELP_TEXT = [
   'config list              List all config values',
   'help / ?                 Show this help',
   'exit / quit / ctrl+c     Exit cvkit',
-  '──────────────────────────────────────────────'
+  '──────────────────────────────────────────────',
+  'Type / to access the tool layer.'
 ].join('\n');
 
-export async function routeCommand(input: string, workspace: Workspace): Promise<CommandResult> {
+const SLASH_MENU_TEXT = [
+  'Available tools  (prefix with /)',
+  '──────────────────────────────────────────────',
+  '/read   <path>              Read a file',
+  '/write  <path> <content>    Write a file',
+  '/edit   <path> <old> <new>  Edit a file',
+  '/glob   <pattern> [path]    Find files by pattern',
+  '/grep   <pattern> [opts]    Search file contents',
+  '/ls     [path]              List directory',
+  '',
+  '──────────────────────────────────────────────',
+  'These tools are also used by the AI loop.',
+  'Type a natural language prompt to use them automatically.'
+].join('\n');
+
+export async function routeCommand(
+  input: string,
+  workspace: Workspace,
+  pendingConfirmation: ConfirmationRequest | null = null
+): Promise<CommandResult> {
   const trimmed = input.trim();
   if (!trimmed) {
     return {type: 'empty'};
   }
 
+  if (pendingConfirmation) {
+    return handleConfirmationResponse(trimmed, pendingConfirmation, workspace);
+  }
+
   if (trimmed === '?') {
     return {type: 'output', message: HELP_TEXT};
+  }
+
+  if (trimmed.startsWith('/')) {
+    return handleSlashCommand(trimmed, workspace);
   }
 
   const [command, ...args] = trimmed.split(/\s+/);
@@ -56,6 +88,192 @@ export async function routeCommand(input: string, workspace: Workspace): Promise
         message: `Unknown command: ${command}\nType help to see available commands.`
       };
   }
+}
+
+async function handleSlashCommand(input: string, workspace: Workspace): Promise<CommandResult> {
+  const raw = input.slice(1);
+
+  let tokens: string[];
+  try {
+    tokens = parseQuotedTokens(raw);
+  } catch (error: unknown) {
+    return {type: 'error', message: toErrorMessage(error)};
+  }
+
+  if (tokens.length === 0) {
+    return {type: 'output', message: SLASH_MENU_TEXT};
+  }
+
+  const [command, ...args] = tokens;
+  switch (command.toLowerCase()) {
+    case 'read':
+      return handleSlashRead(args, workspace);
+    case 'write':
+      return handleSlashWrite(args, workspace);
+    case 'edit':
+      return handleSlashEdit(args, workspace);
+    case 'glob':
+      return handleSlashGlob(args, workspace);
+    case 'grep':
+      return handleSlashGrep(args, workspace);
+    case 'ls':
+      return handleSlashList(args, workspace);
+    default:
+      return {type: 'error', message: `Unknown tool: /${command}`};
+  }
+}
+
+async function handleSlashRead(args: string[], workspace: Workspace): Promise<CommandResult> {
+  if (args.length === 0) {
+    return {type: 'error', message: 'Usage: /read <path>'};
+  }
+
+  return toCommandResult(await readFile(args.join(' '), workspace));
+}
+
+async function handleSlashWrite(args: string[], workspace: Workspace): Promise<CommandResult> {
+  if (args.length < 2) {
+    return {type: 'error', message: 'Usage: /write <path> <content>'};
+  }
+
+  const [filePath, ...contentParts] = args;
+  const content = contentParts.join(' ');
+  const resolvedPath = resolvePath(filePath, workspace.cwd);
+
+  try {
+    const fileInfo = await stat(resolvedPath);
+    if (fileInfo.isFile()) {
+      return {
+        type: 'confirm',
+        message: 'File exists. Overwrite? (y/n)',
+        request: {
+          type: 'write-overwrite',
+          filePath,
+          content
+        }
+      };
+    }
+  } catch (error: unknown) {
+    if (!isErrno(error, 'ENOENT')) {
+      return {type: 'error', message: toErrorMessage(error)};
+    }
+  }
+
+  return executeWrite(filePath, content, workspace);
+}
+
+async function handleSlashEdit(args: string[], workspace: Workspace): Promise<CommandResult> {
+  if (args.length < 3) {
+    return {type: 'error', message: 'Usage: /edit <path> <old> <new>'};
+  }
+
+  const [filePath, oldString, ...newStringParts] = args;
+  const newString = newStringParts.join(' ');
+  return toCommandResult(await editFile(filePath, oldString, newString, workspace));
+}
+
+async function handleSlashGlob(args: string[], workspace: Workspace): Promise<CommandResult> {
+  if (args.length === 0) {
+    return {type: 'error', message: 'Usage: /glob <pattern> [path]'};
+  }
+
+  const [pattern, searchPath] = args;
+  return toCommandResult(await globFiles(pattern, workspace, searchPath));
+}
+
+async function handleSlashGrep(args: string[], workspace: Workspace): Promise<CommandResult> {
+  if (args.length === 0) {
+    return {type: 'error', message: 'Usage: /grep <pattern> [--files <pattern>] [--context <n>]'};
+  }
+
+  const pattern = args[0];
+  let filePattern: string | undefined;
+  let contextLines = 0;
+  let searchPath: string | undefined;
+
+  for (let index = 1; index < args.length; index += 1) {
+    const token = args[index];
+
+    switch (token) {
+      case '--files':
+        if (!args[index + 1]) {
+          return {type: 'error', message: 'Expected a value after --files.'};
+        }
+
+        filePattern = args[index + 1];
+        index += 1;
+        break;
+      case '--context': {
+        const value = Number(args[index + 1]);
+        if (!Number.isInteger(value) || value < 0) {
+          return {type: 'error', message: 'Expected a non-negative integer after --context.'};
+        }
+
+        contextLines = value;
+        index += 1;
+        break;
+      }
+      case '--path':
+        if (!args[index + 1]) {
+          return {type: 'error', message: 'Expected a value after --path.'};
+        }
+
+        searchPath = args[index + 1];
+        index += 1;
+        break;
+      default:
+        if (!searchPath) {
+          searchPath = token;
+          break;
+        }
+
+        return {type: 'error', message: `Unknown option: ${token}`};
+    }
+  }
+
+  return toCommandResult(
+    await grepFiles(pattern, workspace, {
+      path: searchPath,
+      filePattern,
+      contextLines
+    })
+  );
+}
+
+async function handleSlashList(args: string[], workspace: Workspace): Promise<CommandResult> {
+  return toCommandResult(await listDir(args.join(' '), workspace));
+}
+
+async function handleConfirmationResponse(
+  input: string,
+  request: ConfirmationRequest,
+  workspace: Workspace
+): Promise<CommandResult> {
+  const normalized = input.trim().toLowerCase();
+  if (normalized === 'y' || normalized === 'yes') {
+    switch (request.type) {
+      case 'write-overwrite':
+        return executeWrite(request.filePath, request.content, workspace);
+    }
+  }
+
+  if (normalized === 'n' || normalized === 'no') {
+    return {type: 'output', message: 'Write cancelled.'};
+  }
+
+  return {
+    type: 'confirm',
+    message: 'Please answer y or n.\nFile exists. Overwrite? (y/n)',
+    request
+  };
+}
+
+async function executeWrite(
+  filePath: string,
+  content: string,
+  workspace: Workspace
+): Promise<CommandResult> {
+  return toCommandResult(await writeFile(filePath, content, workspace));
 }
 
 async function handleInspect(imagePath: string, workspace: Workspace): Promise<CommandResult> {
@@ -206,7 +424,9 @@ function formatListOutput(imageRows: ImageListItem[], labelFiles: string[]): str
     sections.push('');
   }
 
-  sections.push(`${imageRows.length} image${imageRows.length === 1 ? '' : 's'}, ${labelFiles.length} label${labelFiles.length === 1 ? '' : 's'}`);
+  sections.push(
+    `${imageRows.length} image${imageRows.length === 1 ? '' : 's'}, ${labelFiles.length} label${labelFiles.length === 1 ? '' : 's'}`
+  );
   return sections.join('\n');
 }
 
@@ -235,4 +455,74 @@ function matchesScope(filePath: string, scope: string | null): boolean {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unexpected error.';
+}
+
+function toCommandResult(result: ToolResult): CommandResult {
+  if (result.status === 'success') {
+    return {type: 'output', message: result.output};
+  }
+
+  return {type: 'error', message: result.error ?? result.output};
+}
+
+function parseQuotedTokens(input: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let escaping = false;
+
+  for (const character of input.trim()) {
+    if (escaping) {
+      current += character;
+      escaping = false;
+      continue;
+    }
+
+    if (character === '\\') {
+      escaping = true;
+      continue;
+    }
+
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        current += character;
+      }
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+
+    if (/\s/.test(character)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (escaping) {
+    current += '\\';
+  }
+
+  if (quote) {
+    throw new Error('Unterminated quoted string.');
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code);
 }
