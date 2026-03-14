@@ -1,47 +1,28 @@
 import OpenAI from 'openai';
-import {readConfig} from './config.js';
+import {loadConfig} from './config.js';
 
 export const VISION_MODEL = 'gpt-5-mini-2025-08-07';
 export const TEXT_MODEL = 'gpt-5-nano-2025-08-07';
 
-type OpenAIClientFactory = () => OpenAI | Promise<OpenAI>;
+let _client: OpenAI | null = null;
+let _clientFactory: (() => OpenAI) | null = null;
 
-let clientPromise: Promise<OpenAI> | null = null;
-let testFactory: OpenAIClientFactory | null = null;
-
-export async function getOpenAIClient(): Promise<OpenAI> {
-  if (testFactory) {
-    return await testFactory();
+export function getOpenAIClient(): OpenAI {
+  if (_client) return _client;
+  if (_clientFactory) {
+    _client = _clientFactory();
+    return _client;
   }
-
-  if (!clientPromise) {
-    clientPromise = createOpenAIClient();
-  }
-
-  return await clientPromise;
-}
-
-export function normalizeOpenAIError(error: unknown): Error {
-  const rawMessage = error instanceof Error ? error.message.trim() : 'Unexpected error';
-  if (rawMessage.startsWith('OpenAI API error:')) {
-    return new Error(rawMessage);
-  }
-
-  return new Error(`OpenAI API error: ${rawMessage || 'Unexpected error'}`);
-}
-
-export function setOpenAIClientFactoryForTests(factory: OpenAIClientFactory | null): void {
-  testFactory = factory;
-  clientPromise = null;
-}
-
-async function createOpenAIClient(): Promise<OpenAI> {
-  const config = await readConfig();
+  const config = loadConfig();
   const apiKey = config.OPENAI_API_KEY;
-
   if (!apiKey) {
     throw new Error('OpenAI API key not set.\nRun: cvkit config set OPENAI_API_KEY=sk-...');
   }
+  _client = new OpenAI({apiKey});
+  return _client;
+}
 
-  return new OpenAI({apiKey});
+export function setOpenAIClientFactoryForTests(factory: (() => OpenAI) | null): void {
+  _clientFactory = factory;
+  _client = null;
 }

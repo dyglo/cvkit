@@ -1,6 +1,9 @@
 import {Command} from 'commander';
 import {PACKAGE_VERSION} from './lib/package.js';
+import {registerAnomaly} from './commands/anomaly.js';
+import {registerHistory} from './commands/history.js';
 import {registerInspect} from './commands/inspect.js';
+import {registerLabelAssist} from './commands/label-assist.js';
 import {registerConfig} from './commands/config.js';
 import {registerDataset} from './commands/dataset.js';
 import {registerConvert} from './commands/convert.js';
@@ -22,6 +25,9 @@ export function buildCLI(): Command {
   registerConvert(program);
   registerDescribe(program);
   registerAsk(program);
+  registerAnomaly(program);
+  registerLabelAssist(program);
+  registerHistory(program);
 
   return program;
 }

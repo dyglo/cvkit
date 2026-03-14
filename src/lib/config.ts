@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,14 +17,20 @@ export function getConfigPath(): string {
 export async function readConfig(): Promise<ConfigValues> {
   try {
     const raw = await readFile(getConfigPath(), 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Invalid config file format.');
+    return parseConfig(raw);
+  } catch (error: unknown) {
+    if (isErrno(error, 'ENOENT')) {
+      return {};
     }
 
-    return Object.fromEntries(
-      Object.entries(parsed).map(([key, value]) => [key, String(value)])
-    );
+    throw error;
+  }
+}
+
+export function loadConfig(): ConfigValues {
+  try {
+    const raw = readFileSync(getConfigPath(), 'utf8');
+    return parseConfig(raw);
   } catch (error: unknown) {
     if (isErrno(error, 'ENOENT')) {
       return {};
@@ -58,6 +65,17 @@ export function maskConfigValue(key: string, value: string): string {
 
 export function isSecretKey(key: string): boolean {
   return SECRET_KEY_PATTERN.test(key);
+}
+
+function parseConfig(raw: string): ConfigValues {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid config file format.');
+  }
+
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, value]) => [key, String(value)])
+  );
 }
 
 function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
