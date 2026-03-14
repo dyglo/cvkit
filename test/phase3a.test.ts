@@ -12,7 +12,7 @@ import {imageToBase64} from '../src/lib/vision.js';
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const cliEntry = path.join(projectRoot, 'src', 'cli.ts');
 const samplePng = path.join(projectRoot, 'test', 'fixtures', 'sample.png');
-const publicImagesDir = path.join(projectRoot, 'public', 'test-images');
+const batchFixtureImagesDir = path.join(projectRoot, 'test', 'fixtures', 'synthetic_yolo', 'images');
 
 test('imageToBase64 correctly encodes a PNG fixture', () => {
   const encoded = imageToBase64(samplePng);
@@ -55,7 +55,7 @@ test('batch describe creates CSV with correct headers', async (t) => {
   });
 
   try {
-    const result = await describeDirectory(publicImagesDir, outputPath);
+    const result = await describeDirectory(batchFixtureImagesDir, outputPath);
     assert.equal(result.failed, 0);
 
     const csv = await readFile(outputPath, 'utf8');
