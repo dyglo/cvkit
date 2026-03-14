@@ -23,7 +23,7 @@ export function imageToBase64(imagePath: string): string {
     bmp: 'image/bmp'
   };
   const mime = mimeMap[ext] ?? 'image/jpeg';
-  const data = fs.readFileSync(imagePath).toString('base64');
+  const data = (await fs.promises.readFile(imagePath)).toString('base64');
   return `data:${mime};base64,${data}`;
 }
 
