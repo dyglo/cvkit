@@ -98,7 +98,7 @@ function createFakeOpenAIClient(): OpenAI {
         })
       }
     }
-  } as OpenAI;
+  } as unknown as OpenAI;
 }
 
 function runCli(
