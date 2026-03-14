@@ -1,0 +1,289 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {runAILoopSession, type ConversationMessage} from '../src/ai/loop.js';
+import {getOpenAIClient, setOpenAIClientFactoryForTests} from '../src/lib/openai.js';
+import {routeCommand} from '../src/repl/router.js';
+import type {Workspace} from '../src/lib/workspace.js';
+import {
+  MockResponsesController,
+  createFunctionCallResponse,
+  createMessageResponse
+} from './helpers/fake-openai.js';
+
+test.afterEach(() => {
+  setOpenAIClientFactoryForTests(null);
+});
+
+test('natural language input is routed to the AI loop', async () => {
+  const workspace = createWorkspace(process.cwd());
+  const result = await routeCommand('find all jpg files', workspace);
+
+  assert.deepEqual(result, {
+    type: 'ai',
+    input: 'find all jpg files'
+  });
+});
+
+test('direct commands still route to existing handlers', async () => {
+  const workspace = createWorkspace(process.cwd());
+  const result = await routeCommand('help', workspace);
+
+  assert.equal(result.type, 'output');
+  assert.match(result.message, /Available commands/);
+});
+
+test('AI loop calls glob_files for jpg discovery requests', async (t) => {
+  const workspaceDir = await createWorkspaceDir({
+    'images/a.jpg': 'binary',
+    'images/b.jpg': 'binary'
+  });
+  const workspace = createWorkspace(workspaceDir);
+  const controller = new MockResponsesController([
+    createFunctionCallResponse('resp-1', 'call-1', 'glob_files', {pattern: '**/*.jpg'}),
+    createMessageResponse('resp-2', 'Found 2 JPG files.', ['Found ', '2 JPG files.'])
+  ]);
+  const toolCalls: Array<{tool: string; args: unknown}> = [];
+
+  setOpenAIClientFactoryForTests(() => controller.createClient());
+  t.after(async () => {
+    await rm(workspaceDir, {recursive: true, force: true});
+  });
+
+  const result = await runAILoopSession('find all jpg files', [], {
+    workspace,
+    onThinking: () => {
+      return;
+    },
+    onToolCall: (tool, args) => {
+      toolCalls.push({tool, args});
+    },
+    onOutput: () => {
+      return;
+    }
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.text, 'Found 2 JPG files.');
+  assert.equal(toolCalls[0]?.tool, 'glob_files');
+  assert.deepEqual(toolCalls[0]?.args, {pattern: '**/*.jpg', path: undefined});
+});
+
+test('AI loop handles tool errors and continues to a final response', async (t) => {
+  const workspaceDir = await createWorkspaceDir();
+  const workspace = createWorkspace(workspaceDir);
+  const controller = new MockResponsesController((body, index) => {
+    if (index === 0) {
+      return createFunctionCallResponse('resp-1', 'call-1', 'read_file', {path: 'missing.txt'});
+    }
+
+    assert.equal(body.previous_response_id, 'resp-1');
+    const input = body.input as Array<{type: string; output: string}>;
+    assert.match(input[0]?.output ?? '', /Tool status: not-found/);
+    return createMessageResponse('resp-2', 'I could not read missing.txt because it does not exist.');
+  });
+
+  setOpenAIClientFactoryForTests(() => controller.createClient());
+  t.after(async () => {
+    await rm(workspaceDir, {recursive: true, force: true});
+  });
+
+  const result = await runAILoopSession('read missing.txt', [], {
+    workspace,
+    onThinking: () => {
+      return;
+    },
+    onToolCall: () => {
+      return;
+    },
+    onOutput: () => {
+      return;
+    }
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.match(result.text, /does not exist/);
+});
+
+test('AI loop stops after 10 iterations', async (t) => {
+  const workspaceDir = await createWorkspaceDir();
+  const workspace = createWorkspace(workspaceDir);
+  const controller = new MockResponsesController((_, index) =>
+    createFunctionCallResponse(`resp-${index + 1}`, `call-${index + 1}`, 'list_dir', {path: '.'})
+  );
+
+  setOpenAIClientFactoryForTests(() => controller.createClient());
+  t.after(async () => {
+    await rm(workspaceDir, {recursive: true, force: true});
+  });
+
+  const result = await runAILoopSession('keep listing', [], {
+    workspace,
+    onThinking: () => {
+      return;
+    },
+    onToolCall: () => {
+      return;
+    },
+    onOutput: () => {
+      return;
+    }
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.match(result.text, /stopped after 10 tool iterations/i);
+});
+
+test('conversation history uses previous_response_id across turns', async (t) => {
+  const workspaceDir = await createWorkspaceDir();
+  const workspace = createWorkspace(workspaceDir);
+  const controller = new MockResponsesController((body, index) => {
+    if (index === 0) {
+      assert.equal(body.previous_response_id, undefined);
+      return createMessageResponse('resp-1', 'First answer.');
+    }
+
+    assert.equal(body.previous_response_id, 'resp-1');
+    return createMessageResponse('resp-2', 'Second answer.');
+  });
+
+  setOpenAIClientFactoryForTests(() => controller.createClient());
+  t.after(async () => {
+    await rm(workspaceDir, {recursive: true, force: true});
+  });
+
+  const firstResult = await runAILoopSession('first question', [], {
+    workspace,
+    onThinking: () => {
+      return;
+    },
+    onToolCall: () => {
+      return;
+    },
+    onOutput: () => {
+      return;
+    }
+  });
+
+  assert.equal(firstResult.status, 'completed');
+
+  const history: ConversationMessage[] = [
+    {role: 'user', content: 'first question'},
+    {
+      role: 'assistant',
+      content: firstResult.text,
+      responseId: firstResult.responseId ?? undefined
+    }
+  ];
+
+  const secondResult = await runAILoopSession('second question', history, {
+    workspace,
+    onThinking: () => {
+      return;
+    },
+    onToolCall: () => {
+      return;
+    },
+    onOutput: () => {
+      return;
+    }
+  });
+
+  assert.equal(secondResult.status, 'completed');
+  assert.equal(secondResult.text, 'Second answer.');
+});
+
+test('thinking updates include the tool name being executed', async (t) => {
+  const workspaceDir = await createWorkspaceDir({
+    'images/a.jpg': 'binary'
+  });
+  const workspace = createWorkspace(workspaceDir);
+  const controller = new MockResponsesController([
+    createFunctionCallResponse('resp-1', 'call-1', 'glob_files', {pattern: '**/*.jpg'}),
+    createMessageResponse('resp-2', 'Done.')
+  ]);
+  const statuses: string[] = [];
+
+  setOpenAIClientFactoryForTests(() => controller.createClient());
+  t.after(async () => {
+    await rm(workspaceDir, {recursive: true, force: true});
+  });
+
+  await runAILoopSession('find jpg files', [], {
+    workspace,
+    onThinking: (message) => {
+      statuses.push(message);
+    },
+    onToolCall: () => {
+      return;
+    },
+    onOutput: () => {
+      return;
+    }
+  });
+
+  assert.ok(statuses.includes('Thinking...'));
+  assert.ok(statuses.includes('Calling glob_files for pattern "**/*.jpg"...'));
+});
+
+test('getOpenAIClient uses CVKIT_OPENAI_KEY when no user key is configured', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-ai-home-'));
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalEnvKey = process.env.CVKIT_OPENAI_KEY;
+
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  process.env.CVKIT_OPENAI_KEY = 'sk-env-fallback';
+  setOpenAIClientFactoryForTests(null);
+
+  try {
+    const client = await getOpenAIClient();
+    assert.ok(client);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+
+    if (originalEnvKey === undefined) {
+      delete process.env.CVKIT_OPENAI_KEY;
+    } else {
+      process.env.CVKIT_OPENAI_KEY = originalEnvKey;
+    }
+
+    await rm(home, {recursive: true, force: true});
+  }
+});
+
+function createWorkspace(cwd: string): Workspace {
+  return {
+    cwd,
+    name: path.basename(cwd),
+    allFiles: [],
+    imageFiles: [],
+    labelFiles: [],
+    totalImages: 0
+  };
+}
+
+async function createWorkspaceDir(files: Record<string, string> = {}): Promise<string> {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'cvkit-ai-workspace-'));
+
+  for (const [relativePath, content] of Object.entries(files)) {
+    const absolutePath = path.join(workspaceDir, relativePath);
+    await mkdir(path.dirname(absolutePath), {recursive: true});
+    await writeFile(absolutePath, content, 'utf8');
+  }
+
+  return workspaceDir;
+}

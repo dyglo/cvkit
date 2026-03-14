@@ -3,6 +3,13 @@ import {createInterface} from 'node:readline';
 import React from 'react';
 import {render} from 'ink';
 import chalk from 'chalk';
+import {
+  type AILoopOptions,
+  resumeAILoopAfterConfirmation,
+  runAILoopSession,
+  type ConversationMessage
+} from './ai/loop.js';
+import {loadEnvFile} from './lib/env.js';
 import {buildCLI} from './program.js';
 import {PACKAGE_VERSION} from './lib/package.js';
 import {renderInteractive} from './lib/render.js';
@@ -23,6 +30,7 @@ const BANNER_LINES = [
 ] as const;
 
 export async function runCliApp(): Promise<void> {
+  loadEnvFile();
   const program = buildCLI();
 
   if (process.argv.length > 2) {
@@ -77,15 +85,116 @@ async function runLineRepl(): Promise<void> {
     writeWorkspaceSummary(workspace);
     writePrompt(workspace);
     let pendingConfirmation: ConfirmationRequest | null = null;
+    let conversationHistory: ConversationMessage[] = [];
 
     for await (const line of iterator) {
       process.stdout.write(`${line}\n`);
 
       const result = await routeCommand(line, workspace, pendingConfirmation);
       pendingConfirmation = result.type === 'confirm' ? result.request : null;
-      const shouldContinue = await writeLineReplResult(result);
-      if (!shouldContinue) {
-        return;
+
+      switch (result.type) {
+        case 'ai': {
+          const historyBefore = conversationHistory;
+          const historyWithUser = appendConversationMessage(conversationHistory, {
+            role: 'user',
+            content: line.trim()
+          });
+          conversationHistory = historyWithUser;
+          const controller = createLineAILoopController(workspace);
+          let aiResult: Awaited<ReturnType<typeof runAILoopSession>> & {wasStreamed: boolean};
+
+          try {
+            aiResult = await runLineAI(
+              () => runAILoopSession(line.trim(), historyBefore, controller.options),
+              controller
+            );
+          } catch (error: unknown) {
+            conversationHistory = historyBefore;
+            process.stdout.write(
+              `\n${indentBlock(error instanceof Error ? error.message : 'Unexpected error.')}\n\n`
+            );
+            pendingConfirmation = null;
+            break;
+          }
+
+          if (aiResult.status === 'completed') {
+            const assistantMessage = aiResult.text || 'No response.';
+            if (!aiResult.wasStreamed) {
+              process.stdout.write(`\n${indentBlock(assistantMessage)}\n\n`);
+            } else {
+              process.stdout.write('\n\n');
+            }
+
+            conversationHistory = appendConversationMessage(historyWithUser, {
+              role: 'assistant',
+              content: assistantMessage,
+              responseId: aiResult.responseId ?? undefined
+            });
+            pendingConfirmation = null;
+            break;
+          }
+
+          process.stdout.write(`\n${indentBlock(aiResult.text)}\n\n`);
+          pendingConfirmation = {
+            type: 'ai-tool',
+            pending: aiResult.pending,
+            prompt: aiResult.text
+          };
+          break;
+        }
+        case 'ai-confirm': {
+          const controller = createLineAILoopController(workspace);
+          let aiResult: Awaited<ReturnType<typeof runAILoopSession>> & {wasStreamed: boolean};
+
+          try {
+            aiResult = await runLineAI(
+              () => resumeAILoopAfterConfirmation(result.pending, result.approved, controller.options),
+              controller
+            );
+          } catch (error: unknown) {
+            process.stdout.write(
+              `\n${indentBlock(error instanceof Error ? error.message : 'Unexpected error.')}\n\n`
+            );
+            pendingConfirmation = {
+              type: 'ai-tool',
+              pending: result.pending,
+              prompt: result.pending.prompt
+            };
+            break;
+          }
+
+          if (aiResult.status === 'completed') {
+            const assistantMessage = aiResult.text || 'No response.';
+            if (!aiResult.wasStreamed) {
+              process.stdout.write(`\n${indentBlock(assistantMessage)}\n\n`);
+            } else {
+              process.stdout.write('\n\n');
+            }
+
+            conversationHistory = appendConversationMessage(conversationHistory, {
+              role: 'assistant',
+              content: assistantMessage,
+              responseId: aiResult.responseId ?? undefined
+            });
+            pendingConfirmation = null;
+            break;
+          }
+
+          process.stdout.write(`\n${indentBlock(aiResult.text)}\n\n`);
+          pendingConfirmation = {
+            type: 'ai-tool',
+            pending: aiResult.pending,
+            prompt: aiResult.text
+          };
+          break;
+        }
+        default: {
+          const shouldContinue = await writeLineReplResult(result);
+          if (!shouldContinue) {
+            return;
+          }
+        }
       }
 
       writePrompt(workspace);
@@ -118,6 +227,9 @@ async function writeLineReplResult(
       return true;
     case 'confirm':
       process.stdout.write(`\n${indentBlock(result.message)}\n\n`);
+      return true;
+    case 'ai':
+    case 'ai-confirm':
       return true;
     case 'exit':
       process.stdout.write(`\n  ${result.message}\n`);
@@ -154,4 +266,69 @@ function formatWorkspaceSummary(workspace: Workspace): string {
   lines.push('Type help or / to see available commands.');
 
   return lines.join('\n');
+}
+
+function createLineAILoopController(workspace: Workspace): {
+  options: AILoopOptions;
+  getOutputBuffer: () => string;
+  wasStreamed: () => boolean;
+} {
+  let outputStarted = false;
+  let lastThinkingMessage: string | null = null;
+  let outputBuffer = '';
+
+  return {
+    options: {
+      workspace,
+      onThinking: (message: string) => {
+        if (lastThinkingMessage === message) {
+          return;
+        }
+
+        lastThinkingMessage = message;
+        process.stdout.write(`\n${indentBlock(message)}\n`);
+      },
+      onToolCall: () => {
+        return;
+      },
+      onOutput: (text: string) => {
+        outputBuffer += text;
+
+        if (!outputStarted) {
+          process.stdout.write('\n  ');
+          outputStarted = true;
+        }
+
+        process.stdout.write(text.replace(/\n/g, '\n  '));
+      }
+    },
+    getOutputBuffer: () => outputBuffer,
+    wasStreamed: () => outputStarted
+  };
+}
+
+async function runLineAI(
+  run: () => ReturnType<typeof runAILoopSession> | ReturnType<typeof resumeAILoopAfterConfirmation>,
+  controller: ReturnType<typeof createLineAILoopController>
+): Promise<
+  Awaited<ReturnType<typeof runAILoopSession>> & {
+    wasStreamed: boolean;
+  }
+> {
+  const result = await run();
+  const outputBuffer = controller.getOutputBuffer();
+
+  return {
+    ...(result.status === 'completed' && !result.text && outputBuffer
+      ? {...result, text: outputBuffer}
+      : result),
+    wasStreamed: controller.wasStreamed()
+  };
+}
+
+function appendConversationMessage(
+  history: ConversationMessage[],
+  message: ConversationMessage
+): ConversationMessage[] {
+  return [...history, message].slice(-20);
 }

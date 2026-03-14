@@ -1,5 +1,10 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
+import {
+  resumeAILoopAfterConfirmation,
+  runAILoopSession,
+  type ConversationMessage
+} from '../ai/loop.js';
 import {InputBar} from './InputBar.js';
 import {MessageList} from './MessageList.js';
 import {StatusBar} from './StatusBar.js';
@@ -9,6 +14,7 @@ import type {Workspace} from '../lib/workspace.js';
 
 const MAX_MESSAGES = 50;
 const MAX_HISTORY = 20;
+const MAX_CONVERSATION_MESSAGES = 20;
 const SUMMARY_SEPARATOR = '──────────────────────────────────────';
 
 export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
@@ -16,11 +22,14 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
+  const [thinkingMessage, setThinkingMessage] = useState('Thinking...');
+  const [streamedOutput, setStreamedOutput] = useState('');
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [draftInput, setDraftInput] = useState('');
   const [exitMessage, setExitMessage] = useState<string | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<ConfirmationRequest | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const historyNavigationRef = useRef(false);
 
   useInput(
@@ -64,9 +73,7 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
   const visibleMessages =
     exitMessage !== null
       ? appendMessage(messages, createMessage('output', exitMessage))
-      : thinking
-        ? appendMessage(messages, createMessage('thinking', ''))
-        : messages;
+      : appendTransientMessages(messages, streamedOutput, thinking ? thinkingMessage : null);
 
   return (
     <Box flexDirection="column">
@@ -124,6 +131,8 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
     setMessages((current) => appendMessage(current, createMessage('input', trimmed)));
     setCommandHistory((current) => [...current, trimmed].slice(-MAX_HISTORY));
     setThinking(true);
+    setThinkingMessage('Thinking...');
+    setStreamedOutput('');
 
     try {
       const result = await routeCommand(trimmed, workspace, pendingConfirmation);
@@ -144,6 +153,70 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
           setPendingConfirmation(result.request);
           setMessages((current) => appendMessage(current, createMessage('output', result.message)));
           break;
+        case 'ai': {
+          const historyWithUser = appendConversationMessage(conversationHistory, {
+            role: 'user',
+            content: trimmed
+          });
+          setConversationHistory(historyWithUser);
+
+          const aiResult = await executeAIRequest(async (outputBuffer) =>
+            runAILoopSession(trimmed, conversationHistory, createAILoopOptions(outputBuffer))
+          );
+
+          if (aiResult.status === 'completed') {
+            const assistantMessage = aiResult.text || 'No response.';
+            setMessages((current) => appendMessage(current, createMessage('output', assistantMessage)));
+            setConversationHistory(
+              appendConversationMessage(historyWithUser, {
+                role: 'assistant',
+                content: assistantMessage,
+                responseId: aiResult.responseId ?? undefined
+              })
+            );
+            setPendingConfirmation(null);
+            break;
+          }
+
+          setPendingConfirmation({
+            type: 'ai-tool',
+            pending: aiResult.pending,
+            prompt: aiResult.text
+          });
+          setMessages((current) => appendMessage(current, createMessage('output', aiResult.text)));
+          break;
+        }
+        case 'ai-confirm': {
+          const aiResult = await executeAIRequest(async (outputBuffer) =>
+            resumeAILoopAfterConfirmation(
+              result.pending,
+              result.approved,
+              createAILoopOptions(outputBuffer)
+            )
+          );
+
+          if (aiResult.status === 'completed') {
+            const assistantMessage = aiResult.text || 'No response.';
+            setMessages((current) => appendMessage(current, createMessage('output', assistantMessage)));
+            setConversationHistory((current) =>
+              appendConversationMessage(current, {
+                role: 'assistant',
+                content: assistantMessage,
+                responseId: aiResult.responseId ?? undefined
+              })
+            );
+            setPendingConfirmation(null);
+            break;
+          }
+
+          setPendingConfirmation({
+            type: 'ai-tool',
+            pending: aiResult.pending,
+            prompt: aiResult.text
+          });
+          setMessages((current) => appendMessage(current, createMessage('output', aiResult.text)));
+          break;
+        }
         case 'exit':
           setPendingConfirmation(null);
           triggerExit(result.message);
@@ -153,6 +226,7 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
       const message = error instanceof Error ? error.message : 'Unexpected error.';
       setMessages((current) => appendMessage(current, createMessage('error', message)));
     } finally {
+      setStreamedOutput('');
       setThinking(false);
     }
   }
@@ -198,6 +272,37 @@ export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
     setThinking(false);
     setExitMessage(message);
   }
+
+  function createAILoopOptions(outputBuffer: {value: string}) {
+    return {
+      workspace,
+      onThinking: (message: string) => {
+        setThinkingMessage(message);
+      },
+      onToolCall: () => {
+        return;
+      },
+      onOutput: (text: string) => {
+        outputBuffer.value += text;
+        setStreamedOutput((current) => `${current}${text}`);
+      }
+    };
+  }
+
+  async function executeAIRequest(
+    run: (outputBuffer: {value: string}) => ReturnType<typeof runAILoopSession>
+  ) {
+    const outputBuffer = {value: ''};
+    const result = await run(outputBuffer);
+    if (result.status === 'completed' && !result.text && outputBuffer.value) {
+      return {
+        ...result,
+        text: outputBuffer.value
+      };
+    }
+
+    return result;
+  }
 }
 
 function WorkspaceHeader({workspace}: {workspace: Workspace}): React.JSX.Element {
@@ -229,4 +334,37 @@ function createMessage(role: Message['role'], content: string): Message {
 
 function appendMessage(messages: Message[], message: Message): Message[] {
   return [...messages, message].slice(-MAX_MESSAGES);
+}
+
+function appendTransientMessages(
+  messages: Message[],
+  streamedOutput: string,
+  thinkingMessage: string | null
+): Message[] {
+  const visibleMessages = [...messages];
+
+  if (streamedOutput) {
+    visibleMessages.push({
+      id: 'streamed-output',
+      role: 'output',
+      content: streamedOutput
+    });
+  }
+
+  if (thinkingMessage) {
+    visibleMessages.push({
+      id: 'thinking-status',
+      role: 'thinking',
+      content: thinkingMessage
+    });
+  }
+
+  return visibleMessages;
+}
+
+function appendConversationMessage(
+  history: ConversationMessage[],
+  message: ConversationMessage
+): ConversationMessage[] {
+  return [...history, message].slice(-MAX_CONVERSATION_MESSAGES);
 }

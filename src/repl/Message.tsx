@@ -35,7 +35,7 @@ export function Message({
     case 'thinking':
       return (
         <Box paddingLeft={2}>
-          <Spinner />
+          <Spinner label={message.content || 'Thinking...'} />
         </Box>
       );
     case 'output':

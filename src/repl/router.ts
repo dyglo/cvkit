@@ -14,6 +14,24 @@ import {editFile, globFiles, grepFiles, listDir, readFile, writeFile} from '../t
 import type {ToolResult} from '../tools/index.js';
 import type {CommandResult, ConfirmationRequest, ImageListItem} from './types.js';
 
+const DIRECT_COMMANDS = [
+  'help',
+  '?',
+  'exit',
+  'quit',
+  'pwd',
+  'ls',
+  'inspect',
+  'config',
+  '/read',
+  '/write',
+  '/edit',
+  '/glob',
+  '/grep',
+  '/ls',
+  '/'
+] as const;
+
 const HELP_TEXT = [
   'Available commands',
   '──────────────────────────────────────────────',
@@ -62,6 +80,10 @@ export async function routeCommand(
     return {type: 'output', message: HELP_TEXT};
   }
 
+  if (!isDirectCommand(trimmed)) {
+    return {type: 'ai', input: trimmed};
+  }
+
   if (trimmed.startsWith('/')) {
     return handleSlashCommand(trimmed, workspace);
   }
@@ -83,10 +105,7 @@ export async function routeCommand(
     case 'quit':
       return {type: 'exit', message: 'Goodbye.'};
     default:
-      return {
-        type: 'error',
-        message: `Unknown command: ${command}\nType help to see available commands.`
-      };
+      return {type: 'ai', input: trimmed};
   }
 }
 
@@ -253,17 +272,34 @@ async function handleConfirmationResponse(
   if (normalized === 'y' || normalized === 'yes') {
     switch (request.type) {
       case 'write-overwrite':
-        return executeWrite(request.filePath, request.content, workspace);
+        return executeWrite(request.filePath ?? '', request.content ?? '', workspace);
+      case 'ai-tool':
+        if (!request.pending) {
+          return {type: 'error', message: 'Missing pending AI confirmation state.'};
+        }
+
+        return {type: 'ai-confirm', approved: true, pending: request.pending};
     }
   }
 
   if (normalized === 'n' || normalized === 'no') {
+    if (request.type === 'ai-tool') {
+      if (!request.pending) {
+        return {type: 'error', message: 'Missing pending AI confirmation state.'};
+      }
+
+      return {type: 'ai-confirm', approved: false, pending: request.pending};
+    }
+
     return {type: 'output', message: 'Write cancelled.'};
   }
 
   return {
     type: 'confirm',
-    message: 'Please answer y or n.\nFile exists. Overwrite? (y/n)',
+    message:
+      request.type === 'ai-tool'
+        ? `Please answer y or n.\n${request.prompt ?? 'Allow AI tool execution? (y/n)'}`
+        : 'Please answer y or n.\nFile exists. Overwrite? (y/n)',
     request
   };
 }
@@ -525,4 +561,9 @@ function parseQuotedTokens(input: string): string[] {
 
 function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code);
+}
+
+function isDirectCommand(input: string): boolean {
+  const lower = input.trim().toLowerCase();
+  return DIRECT_COMMANDS.some((command) => lower === command || lower.startsWith(`${command} `));
 }

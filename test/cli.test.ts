@@ -62,11 +62,18 @@ test('repl help command returns available commands', async () => {
   assert.match(result.stdout, /pwd/);
 });
 
-test('repl unknown command returns a suggestion', async () => {
-  const result = await runCli([], {input: '\nblah\nexit\n'});
-  assert.equal(result.code, 0);
-  assert.match(result.stdout, /Unknown command: blah/);
-  assert.match(result.stdout, /Type help to see available commands\./);
+test('natural language input routes to the AI loop instead of unknown command handling', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-ai-home-'));
+
+  try {
+    const result = await runCli([], {input: '\nfind all jpg files\nexit\n', home});
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Thinking\.\.\./);
+    assert.doesNotMatch(result.stdout, /Unknown command:/);
+  } finally {
+    await rm(home, {recursive: true, force: true});
+  }
 });
 
 test('repl exit command exits cleanly', async () => {
