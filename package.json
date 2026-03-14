@@ -8,10 +8,8 @@
   },
   "files": [
     "dist",
-    "migrations",
     "README.md",
-    "LICENSE",
-    "workers"
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -22,7 +20,7 @@
     "postbuild": "node -e \"import('node:fs').then((fs)=>fs.chmodSync('dist/index.js',0o755))\"",
     "fixtures": "tsx scripts/gen-fixtures.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test"
+    "test": "npm run fixtures && npm run build && node --import tsx --test test/cli.test.ts"
   },
   "keywords": [
     "computer-vision",
