@@ -1,4 +1,4 @@
-import {mkdir, writeFile} from 'node:fs/promises';
+import {mkdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import React, {useEffect, useState} from 'react';
@@ -323,8 +323,9 @@ function buildDescribeCsv(rows: DescribeCsvRow[]): string {
 }
 
 function escapeCsvCell(value: string): string {
-  const escaped = value.replaceAll('"', '""');
-  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+  const defanged = /^[=+\-@]/.test(value) ? `\t${value}` : value;
+  const escaped = defanged.replaceAll('"', '""');
+  return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
 }
 
 function createTimestamp(): string {

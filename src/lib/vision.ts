@@ -23,7 +23,7 @@ export function imageToBase64(imagePath: string): string {
     bmp: 'image/bmp'
   };
   const mime = mimeMap[ext] ?? 'image/jpeg';
-  const data = (await fs.promises.readFile(imagePath)).toString('base64');
+  const data = fs.readFileSync(imagePath).toString('base64');
   return `data:${mime};base64,${data}`;
 }
 
@@ -119,7 +119,7 @@ export async function callStructuredVision<T>({
     }
 
     if (error instanceof Error && error.message.startsWith('Failed to parse model output:')) {
-      throw normalizeOpenAIError(error);
+      throw error;
     }
 
     throw normalizeOpenAIError(error);

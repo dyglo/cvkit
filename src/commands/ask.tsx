@@ -81,8 +81,8 @@ function AskView({result}: {result: AskResult}): React.JSX.Element {
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean)
-        .map((line) => (
-          <Box key={line} paddingLeft={2}>
+        .map((line, index) => (
+          <Box key={`${index}:${line}`} paddingLeft={2}>
             <Text>{line}</Text>
           </Box>
         ))}
