@@ -1,5 +1,11 @@
-import {FunctionCallingConfigMode} from '@google/genai';
-import {getClient, TEXT_MODEL, type AIClient, type AIContent, type AIResponse} from '../lib/ai-client.js';
+import {
+  FunctionCallingConfigMode,
+  getClient,
+  TEXT_MODEL,
+  type AIClient,
+  type AIContent,
+  type AIResponse
+} from '../lib/ai-client.js';
 import type {Workspace} from '../lib/workspace.js';
 import {buildSystemPrompt} from './system-prompt.js';
 import {
@@ -131,8 +137,7 @@ async function continueAILoop({
         systemInstruction: buildSystemPrompt(options.workspace, toolNames),
         toolConfig: {
           functionCallingConfig: {
-            mode: FunctionCallingConfigMode.VALIDATED,
-            allowedFunctionNames: [...allowedTools]
+            mode: FunctionCallingConfigMode.AUTO
           }
         },
         tools: [

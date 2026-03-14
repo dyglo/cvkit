@@ -1,8 +1,9 @@
-import {GoogleGenAI} from '@google/genai';
+import {GoogleGenAI, FunctionCallingConfigMode} from '@google/genai';
 import {loadConfig} from './config.js';
+import {MODELS} from './models.js';
 
-export const VISION_MODEL = 'gemini-3-flash-preview';
-export const TEXT_MODEL = 'gemini-3-flash-preview';
+export const VISION_MODEL = MODELS.FLASH_PREVIEW;
+export const TEXT_MODEL = MODELS.FLASH_PREVIEW;
 
 export type AIContentPart = {
   text?: string;
@@ -53,6 +54,8 @@ export interface AIClient {
   };
 }
 
+export {FunctionCallingConfigMode};
+
 type AIClientFactory = () => AIClient | Promise<AIClient>;
 
 let clientPromise: Promise<AIClient> | null = null;
@@ -64,7 +67,10 @@ export async function getClient(): Promise<AIClient> {
   }
 
   if (!clientPromise) {
-    clientPromise = createClient();
+    clientPromise = createClient().catch((error: unknown) => {
+      clientPromise = null;
+      throw error;
+    });
   }
 
   return await clientPromise;
@@ -92,5 +98,14 @@ async function createClient(): Promise<AIClient> {
     throw new Error('Gemini API key not set.\nRun: cvkit config set GEMINI_API_KEY=your-key');
   }
 
-  return new GoogleGenAI({apiKey}) as unknown as AIClient;
+  const client = new GoogleGenAI({apiKey});
+
+  return {
+    models: {
+      generateContent: async (params: Record<string, unknown>) =>
+        (await client.models.generateContent(params as never)) as unknown as AIResponse,
+      generateContentStream: async (params: Record<string, unknown>) =>
+        (await client.models.generateContentStream(params as never)) as unknown as AsyncIterable<AIResponse>
+    }
+  };
 }

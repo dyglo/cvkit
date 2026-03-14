@@ -307,6 +307,53 @@ test('getClient uses CVKIT_GEMINI_KEY when no user key is configured', async () 
   }
 });
 
+test('getClient retries after an initial missing-key failure in the same session', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-ai-retry-home-'));
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+  const originalFallbackKey = process.env.CVKIT_GEMINI_KEY;
+
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.CVKIT_GEMINI_KEY;
+  setClientFactoryForTests(null);
+
+  try {
+    await assert.rejects(() => getClient(), /Gemini API key not set/);
+    process.env.CVKIT_GEMINI_KEY = 'gemini-env-fallback';
+    const client = await getClient();
+    assert.ok(client);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+
+    if (originalGeminiKey === undefined) {
+      delete process.env.GEMINI_API_KEY;
+    } else {
+      process.env.GEMINI_API_KEY = originalGeminiKey;
+    }
+
+    if (originalFallbackKey === undefined) {
+      delete process.env.CVKIT_GEMINI_KEY;
+    } else {
+      process.env.CVKIT_GEMINI_KEY = originalFallbackKey;
+    }
+
+    await rm(home, {recursive: true, force: true});
+  }
+});
+
 function createWorkspace(cwd: string): Workspace {
   return {
     cwd,
