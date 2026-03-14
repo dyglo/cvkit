@@ -1,15 +1,17 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Box, useApp, useInput} from 'ink';
+import {Box, Text, useApp, useInput} from 'ink';
 import {InputBar} from './InputBar.js';
 import {MessageList} from './MessageList.js';
 import {StatusBar} from './StatusBar.js';
 import {routeCommand} from './router.js';
 import type {Message} from './types.js';
+import type {Workspace} from '../lib/workspace.js';
 
 const MAX_MESSAGES = 50;
 const MAX_HISTORY = 20;
+const SUMMARY_SEPARATOR = '──────────────────────────────────────';
 
-export function Repl(): React.JSX.Element {
+export function Repl({workspace}: {workspace: Workspace}): React.JSX.Element {
   const {exit} = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -67,7 +69,10 @@ export function Repl(): React.JSX.Element {
 
   return (
     <Box flexDirection="column">
-      <MessageList messages={visibleMessages} />
+      <WorkspaceHeader workspace={workspace} />
+      <Box marginTop={1}>
+        <MessageList messages={visibleMessages} workspaceName={workspace.name} />
+      </Box>
       {exitMessage === null ? (
         thinking ? (
           <Box marginTop={visibleMessages.length > 0 ? 1 : 0}>
@@ -75,7 +80,12 @@ export function Repl(): React.JSX.Element {
           </Box>
         ) : (
           <Box flexDirection="column" marginTop={visibleMessages.length > 0 ? 1 : 0}>
-            <InputBar value={input} onChange={handleInputChange} onSubmit={handleSubmit} />
+            <InputBar
+              workspaceName={workspace.name}
+              value={input}
+              onChange={handleInputChange}
+              onSubmit={handleSubmit}
+            />
             <StatusBar />
           </Box>
         )
@@ -115,7 +125,7 @@ export function Repl(): React.JSX.Element {
     setThinking(true);
 
     try {
-      const result = await routeCommand(trimmed);
+      const result = await routeCommand(trimmed, workspace);
 
       switch (result.type) {
         case 'empty':
@@ -179,6 +189,25 @@ export function Repl(): React.JSX.Element {
     setThinking(false);
     setExitMessage(message);
   }
+}
+
+function WorkspaceHeader({workspace}: {workspace: Workspace}): React.JSX.Element {
+  const details =
+    workspace.totalImages > 0
+      ? [`Images:    ${workspace.totalImages} files found`, `Labels:    ${workspace.labelFiles.length} annotation files found`]
+      : ['No images found in this directory.'];
+
+  return (
+    <Box flexDirection="column">
+      <Text>{`  Workspace: ${workspace.name}`}</Text>
+      <Text>{`  Path:      ${workspace.cwd}`}</Text>
+      {details.map((line) => (
+        <Text key={line}>{`  ${line}`}</Text>
+      ))}
+      <Text>{`  ${SUMMARY_SEPARATOR}`}</Text>
+      <Text>  Type help to see available commands.</Text>
+    </Box>
+  );
 }
 
 function createMessage(role: Message['role'], content: string): Message {

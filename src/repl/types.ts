@@ -6,6 +6,12 @@ export interface Message {
   content: string;
 }
 
+export interface ImageListItem {
+  path: string;
+  format: string;
+  dimensions: string;
+}
+
 export type CommandResult =
   | {type: 'empty'}
   | {type: 'output'; message: string}

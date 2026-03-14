@@ -1,4 +1,6 @@
+import path from 'node:path';
 import {formatBytes, inspectImage} from '../lib/image.js';
+import {resolvePath} from '../lib/resolve.js';
 import {
   getConfigPath,
   isSecretKey,
@@ -6,20 +8,23 @@ import {
   readConfig,
   setConfigValue
 } from '../lib/config.js';
-import type {CommandResult} from './types.js';
+import type {Workspace} from '../lib/workspace.js';
+import type {CommandResult, ImageListItem} from './types.js';
 
 const HELP_TEXT = [
   'Available commands',
-  '──────────────────────────────────',
+  '──────────────────────────────────────────────',
   'inspect <path>           Inspect image metadata',
+  'ls [subdir]              List images and labels',
+  'pwd                      Show working directory',
   'config set <KEY=VALUE>   Save a config value',
   'config list              List all config values',
-  'help                     Show this help',
+  'help / ?                 Show this help',
   'exit / quit / ctrl+c     Exit cvkit',
-  '──────────────────────────────────'
+  '──────────────────────────────────────────────'
 ].join('\n');
 
-export async function routeCommand(input: string): Promise<CommandResult> {
+export async function routeCommand(input: string, workspace: Workspace): Promise<CommandResult> {
   const trimmed = input.trim();
   if (!trimmed) {
     return {type: 'empty'};
@@ -33,7 +38,11 @@ export async function routeCommand(input: string): Promise<CommandResult> {
 
   switch (command.toLowerCase()) {
     case 'inspect':
-      return handleInspect(args.join(' '));
+      return handleInspect(args.join(' '), workspace);
+    case 'ls':
+      return handleList(args.join(' '), workspace);
+    case 'pwd':
+      return handlePrintWorkingDirectory(workspace);
     case 'config':
       return handleConfig(args);
     case 'help':
@@ -49,13 +58,13 @@ export async function routeCommand(input: string): Promise<CommandResult> {
   }
 }
 
-async function handleInspect(imagePath: string): Promise<CommandResult> {
+async function handleInspect(imagePath: string, workspace: Workspace): Promise<CommandResult> {
   if (!imagePath.trim()) {
     return {type: 'error', message: 'Usage: inspect <path>'};
   }
 
   try {
-    const metadata = await inspectImage(imagePath);
+    const metadata = await inspectImage(resolvePath(imagePath, workspace.cwd));
     return {
       type: 'output',
       message: formatRows([
@@ -72,6 +81,43 @@ async function handleInspect(imagePath: string): Promise<CommandResult> {
   } catch (error: unknown) {
     return {type: 'error', message: toErrorMessage(error)};
   }
+}
+
+async function handleList(subdirectory: string, workspace: Workspace): Promise<CommandResult> {
+  try {
+    const scope = normalizeScope(subdirectory);
+    const imageFiles = workspace.imageFiles.filter((filePath) => matchesScope(filePath, scope));
+    const labelFiles = workspace.labelFiles.filter((filePath) => matchesScope(filePath, scope));
+
+    if (imageFiles.length === 0 && labelFiles.length === 0) {
+      return {
+        type: 'output',
+        message: ['No images or labels found in this directory.', '', '0 images, 0 labels'].join('\n')
+      };
+    }
+
+    const imageRows = await Promise.all(
+      imageFiles.map(async (filePath) => {
+        const metadata = await inspectImage(path.join(workspace.cwd, ...filePath.split('/')));
+        return {
+          path: filePath,
+          format: metadata.format,
+          dimensions: `${metadata.width}×${metadata.height}`
+        } satisfies ImageListItem;
+      })
+    );
+
+    return {
+      type: 'output',
+      message: formatListOutput(imageRows, labelFiles)
+    };
+  } catch (error: unknown) {
+    return {type: 'error', message: toErrorMessage(error)};
+  }
+}
+
+function handlePrintWorkingDirectory(workspace: Workspace): CommandResult {
+  return {type: 'output', message: workspace.cwd};
 }
 
 async function handleConfig(args: string[]): Promise<CommandResult> {
@@ -130,6 +176,61 @@ async function handleConfigList(): Promise<CommandResult> {
 function formatRows(rows: ReadonlyArray<readonly [string, string]>): string {
   const width = rows.reduce((max, [label]) => Math.max(max, label.length), 0);
   return rows.map(([label, value]) => `${label.padEnd(width + 2)}${value}`).join('\n');
+}
+
+function formatListOutput(imageRows: ImageListItem[], labelFiles: string[]): string {
+  const sections: string[] = [];
+
+  if (imageRows.length > 0) {
+    const pathWidth = imageRows.reduce((max, row) => Math.max(max, row.path.length), 0);
+    const formatWidth = imageRows.reduce((max, row) => Math.max(max, row.format.length), 0);
+    sections.push('images/');
+    sections.push(
+      ...imageRows.map(
+        (row) =>
+          `  ${row.path.padEnd(pathWidth + 2)}${row.format.padEnd(formatWidth + 2)}${row.dimensions}`
+      )
+    );
+  }
+
+  if (labelFiles.length > 0) {
+    if (sections.length > 0) {
+      sections.push('');
+    }
+
+    sections.push('labels/');
+    sections.push(...labelFiles.map((filePath) => `  ${filePath}`));
+  }
+
+  if (sections.length > 0) {
+    sections.push('');
+  }
+
+  sections.push(`${imageRows.length} image${imageRows.length === 1 ? '' : 's'}, ${labelFiles.length} label${labelFiles.length === 1 ? '' : 's'}`);
+  return sections.join('\n');
+}
+
+function normalizeScope(subdirectory: string): string | null {
+  const trimmed = subdirectory.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '');
+
+  return normalized || null;
+}
+
+function matchesScope(filePath: string, scope: string | null): boolean {
+  if (!scope) {
+    return true;
+  }
+
+  return filePath === scope || filePath.startsWith(`${scope}/`);
 }
 
 function toErrorMessage(error: unknown): string {

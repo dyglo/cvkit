@@ -2,12 +2,15 @@ import process from 'node:process';
 import {createInterface} from 'node:readline';
 import React from 'react';
 import {render} from 'ink';
+import chalk from 'chalk';
 import {buildCLI} from './program.js';
 import {PACKAGE_VERSION} from './lib/package.js';
 import {renderInteractive} from './lib/render.js';
+import {detectWorkspace} from './lib/workspace.js';
 import {routeCommand} from './repl/router.js';
 import {Repl} from './repl/Repl.js';
 import {Banner} from './ui/Banner.js';
+import type {Workspace} from './lib/workspace.js';
 
 const BANNER_LINES = [
   ' ██████╗██╗   ██╗██╗  ██╗██╗████████╗',
@@ -28,7 +31,8 @@ export async function runCliApp(): Promise<void> {
 
   if (process.stdin.isTTY && process.stdout.isTTY) {
     await renderBanner();
-    await renderInteractive(<Repl />);
+    const workspace = await detectWorkspace();
+    await renderInteractive(<Repl workspace={workspace} />);
     return;
   }
 
@@ -68,18 +72,20 @@ async function runLineRepl(): Promise<void> {
       return;
     }
 
-    writePrompt();
+    const workspace = await detectWorkspace();
+    writeWorkspaceSummary(workspace);
+    writePrompt(workspace);
 
     for await (const line of iterator) {
       process.stdout.write(`${line}\n`);
 
-      const result = await routeCommand(line);
+      const result = await routeCommand(line, workspace);
       const shouldContinue = await writeLineReplResult(result);
       if (!shouldContinue) {
         return;
       }
 
-      writePrompt();
+      writePrompt(workspace);
     }
   } finally {
     readline.close();
@@ -113,8 +119,12 @@ async function writeLineReplResult(
   }
 }
 
-function writePrompt(): void {
-  process.stdout.write('> ');
+function writeWorkspaceSummary(workspace: Workspace): void {
+  process.stdout.write(`\n${indentBlock(formatWorkspaceSummary(workspace))}\n\n`);
+}
+
+function writePrompt(workspace: Workspace): void {
+  process.stdout.write(`${chalk.dim(workspace.name)}${chalk.hex('#4ecdc4')(' > ')}`);
 }
 
 function indentBlock(content: string): string {
@@ -122,4 +132,20 @@ function indentBlock(content: string): string {
     .split('\n')
     .map((line) => `  ${line}`)
     .join('\n');
+}
+
+function formatWorkspaceSummary(workspace: Workspace): string {
+  const lines = [`Workspace: ${workspace.name}`, `Path:      ${workspace.cwd}`];
+
+  if (workspace.totalImages > 0) {
+    lines.push(`Images:    ${workspace.totalImages} files found`);
+    lines.push(`Labels:    ${workspace.labelFiles.length} annotation files found`);
+  } else {
+    lines.push('No images found in this directory.');
+  }
+
+  lines.push('──────────────────────────────────────');
+  lines.push('Type help to see available commands.');
+
+  return lines.join('\n');
 }

@@ -1,8 +1,11 @@
+import process from 'node:process';
 import React from 'react';
 import {Box} from 'ink';
 import {Command} from 'commander';
 import {inspectImage, formatBytes} from '../lib/image.js';
+import {resolvePath} from '../lib/resolve.js';
 import {renderOnce} from '../lib/render.js';
+import {detectWorkspace} from '../lib/workspace.js';
 import {Table} from '../ui/Table.js';
 
 export function registerInspect(program: Command): void {
@@ -11,7 +14,8 @@ export function registerInspect(program: Command): void {
     .description('Inspect image metadata')
     .argument('<imagePath>', 'Image path')
     .action(async (imagePath: string) => {
-      const metadata = await inspectImage(imagePath);
+      await detectWorkspace();
+      const metadata = await inspectImage(resolvePath(imagePath, process.cwd()));
       await renderOnce(
         <Box flexDirection="column">
           <Table
