@@ -70,6 +70,7 @@ export async function runAILoopSession(
   conversationHistory: ConversationMessage[],
   options: AILoopOptions
 ): Promise<AILoopRunResult> {
+  options.onThinking('Thinking...');
   const previousResponseId = findLatestResponseId(conversationHistory);
   const input = buildInitialInput(userInput, conversationHistory, previousResponseId);
 
@@ -87,6 +88,7 @@ export async function resumeAILoopAfterConfirmation(
   approved: boolean,
   options: AILoopOptions
 ): Promise<AILoopRunResult> {
+  options.onThinking('Thinking...');
   const client = await getOpenAIClient();
   let output: string;
 
