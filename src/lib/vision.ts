@@ -82,7 +82,8 @@ export async function listVisionImages(dirPath: string): Promise<string[]> {
 export async function callStructuredVision<T>({
   imagePath,
   prompt,
-  maxTokens = 1000
+  maxTokens = 1000,
+  responseSchema
 }: {
   imagePath: string;
   prompt: string;
