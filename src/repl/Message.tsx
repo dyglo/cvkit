@@ -6,12 +6,19 @@ import type {Message as ReplMessage} from './types.js';
 
 const teal = chalk.hex('#4ecdc4');
 
-export function Message({message}: {message: ReplMessage}): React.JSX.Element {
+export function Message({
+  message,
+  workspaceName
+}: {
+  message: ReplMessage;
+  workspaceName: string;
+}): React.JSX.Element {
   switch (message.role) {
     case 'input':
       return (
         <Box>
-          <Text>{teal('> ')}</Text>
+          <Text color="gray">{workspaceName}</Text>
+          <Text>{teal(' > ')}</Text>
           <Text>{message.content}</Text>
         </Box>
       );
