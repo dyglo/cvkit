@@ -1,7 +1,8 @@
 import OpenAI from 'openai';
-import {readConfig} from './config.js';
+import {loadConfig} from './config.js';
 
-export const VISION_MODEL = 'gpt-5-mini-2025-08-07';
+export const PRIMARY_MODEL = 'gpt-5-mini-2025-08-07';
+export const VISION_MODEL = PRIMARY_MODEL;
 export const TEXT_MODEL = 'gpt-5-nano-2025-08-07';
 
 type OpenAIClientFactory = () => OpenAI | Promise<OpenAI>;
@@ -36,8 +37,8 @@ export function setOpenAIClientFactoryForTests(factory: OpenAIClientFactory | nu
 }
 
 async function createOpenAIClient(): Promise<OpenAI> {
-  const config = await readConfig();
-  const apiKey = config.OPENAI_API_KEY;
+  const config = loadConfig();
+  const apiKey = config.OPENAI_API_KEY || process.env.CVKIT_OPENAI_KEY;
 
   if (!apiKey) {
     throw new Error('OpenAI API key not set.\nRun: cvkit config set OPENAI_API_KEY=sk-...');

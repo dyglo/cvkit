@@ -3,21 +3,9 @@ import {Text} from 'ink';
 import chalk from 'chalk';
 
 const teal = chalk.hex('#4ecdc4');
+const FRAMES = ['●', '◐', '◓', '◑', '◒'] as const;
 
-const FRAMES = [
-  '● Thinking...',
-  'Thinking...',
-  'Working...',
-  'Analyzing...',
-  'Processing...',
-  'Flibbertigibbeting...',
-  'Flummoxing...',
-  'Ruminating...',
-  'Contemplating...',
-  'Lollygagging...'
-] as const;
-
-export function Spinner(): React.JSX.Element {
+export function Spinner({label = 'Thinking...'}: {label?: string}): React.JSX.Element {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
@@ -30,5 +18,5 @@ export function Spinner(): React.JSX.Element {
     };
   }, []);
 
-  return <Text>{teal(FRAMES[index])}</Text>;
+  return <Text>{teal(`${FRAMES[index]} ${label}`)}</Text>;
 }
