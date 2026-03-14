@@ -4,8 +4,8 @@ import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {detectWorkspace, resetWorkspaceCacheForTests} from '../src/lib/workspace.ts';
-import {resolvePath} from '../src/lib/resolve.ts';
+import {detectWorkspace, resetWorkspaceCacheForTests} from '../src/lib/workspace.js';
+import {resolvePath} from '../src/lib/resolve.js';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const cliEntry = path.join(projectRoot, 'dist', 'index.js');
