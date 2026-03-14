@@ -1,6 +1,10 @@
 import type {Workspace} from '../lib/workspace.js';
+import {ALL_AI_TOOL_NAMES, type AIToolName} from './tools.js';
 
-export function buildSystemPrompt(workspace: Workspace): string {
+export function buildSystemPrompt(
+  workspace: Workspace,
+  toolNames: readonly AIToolName[] = ALL_AI_TOOL_NAMES
+): string {
   return [
     'You are cvkit, an AI-powered computer vision toolkit running in the terminal.',
     `You are operating inside the project: ${workspace.name}`,
@@ -14,7 +18,7 @@ export function buildSystemPrompt(workspace: Workspace): string {
     '- Finding and organizing CV project files',
     '- Understanding dataset structure and quality',
     '',
-    'You have access to these tools: read_file, write_file, edit_file, glob_files, grep_files, inspect_image, list_dir.',
+    `You have access to these tools: ${toolNames.join(', ')}.`,
     'Always use tools to ground your responses in the actual project files.',
     'When asked about files, read them first before answering.',
     'Be concise and technical. This is a terminal environment with plain text only.',

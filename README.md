@@ -78,6 +78,8 @@ The Cloud Run wrapper exposes a minimal HTTP API:
 - `GET /health`
 - `POST /v1/ai/respond`
 
+The HTTP AI endpoint is intentionally read-only. It exposes `read_file`, `glob_files`, `grep_files`, `inspect_image`, and `list_dir`, but not `write_file` or `edit_file`.
+
 Example:
 
 ```bash
@@ -105,11 +107,11 @@ docker compose up --build
 
 ## Cloud Run
 
-Deploy the HTTP wrapper to Cloud Run with:
+Deploy the HTTP wrapper to Cloud Run with authenticated access and a Secret Manager-backed OpenAI key:
 
 ```bash
 chmod +x deploy/cloud-run.sh
-CVKIT_OPENAI_KEY=sk-... deploy/cloud-run.sh <project-id> <region>
+deploy/cloud-run.sh <project-id> <region> <openai-secret-name> [service-name] [secret-version]
 ```
 
 ## Roadmap

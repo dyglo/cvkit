@@ -2,6 +2,7 @@ import http, {type IncomingMessage, type ServerResponse} from 'node:http';
 import process from 'node:process';
 import {pathToFileURL} from 'node:url';
 import {runAILoopSession} from './ai/loop.js';
+import {READ_ONLY_AI_TOOL_NAMES} from './ai/tools.js';
 import {loadEnvFile} from './lib/env.js';
 import {PACKAGE_VERSION} from './lib/package.js';
 import {detectWorkspace} from './lib/workspace.js';
@@ -57,6 +58,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const chunks: string[] = [];
     const result = await runAILoopSession(input, [], {
       workspace,
+      toolNames: READ_ONLY_AI_TOOL_NAMES,
       onThinking: () => {
         return;
       },
@@ -69,9 +71,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     });
 
     if (result.status === 'confirmation_required') {
-      writeJson(response, 409, {
-        status: result.status,
-        message: result.text
+      writeJson(response, 500, {
+        error: 'HTTP AI endpoint is read-only. Mutating AI tools are disabled for server requests.'
       });
       return;
     }
@@ -89,11 +90,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
+  let totalSize = 0;
 
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    chunks.push(buffer);
+    totalSize += buffer.length;
 
-    if (Buffer.concat(chunks).length > 1_000_000) {
+    if (totalSize > 1_000_000) {
       throw new Error('Request body too large.');
     }
   }

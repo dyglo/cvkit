@@ -14,13 +14,17 @@ export interface ImageListItem {
   dimensions: string;
 }
 
-export interface ConfirmationRequest {
-  type: 'write-overwrite' | 'ai-tool';
-  filePath?: string;
-  content?: string;
-  pending?: PendingAIToolCall;
-  prompt?: string;
-}
+export type ConfirmationRequest =
+  | {
+      type: 'write-overwrite';
+      filePath: string;
+      content: string;
+    }
+  | {
+      type: 'ai-tool';
+      pending: PendingAIToolCall;
+      prompt: string;
+    };
 
 export type CommandResult =
   | {type: 'empty'}

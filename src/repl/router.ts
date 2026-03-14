@@ -272,22 +272,14 @@ async function handleConfirmationResponse(
   if (normalized === 'y' || normalized === 'yes') {
     switch (request.type) {
       case 'write-overwrite':
-        return executeWrite(request.filePath ?? '', request.content ?? '', workspace);
+        return executeWrite(request.filePath, request.content, workspace);
       case 'ai-tool':
-        if (!request.pending) {
-          return {type: 'error', message: 'Missing pending AI confirmation state.'};
-        }
-
         return {type: 'ai-confirm', approved: true, pending: request.pending};
     }
   }
 
   if (normalized === 'n' || normalized === 'no') {
     if (request.type === 'ai-tool') {
-      if (!request.pending) {
-        return {type: 'error', message: 'Missing pending AI confirmation state.'};
-      }
-
       return {type: 'ai-confirm', approved: false, pending: request.pending};
     }
 
@@ -298,7 +290,7 @@ async function handleConfirmationResponse(
     type: 'confirm',
     message:
       request.type === 'ai-tool'
-        ? `Please answer y or n.\n${request.prompt ?? 'Allow AI tool execution? (y/n)'}`
+        ? `Please answer y or n.\n${request.prompt}`
         : 'Please answer y or n.\nFile exists. Overwrite? (y/n)',
     request
   };

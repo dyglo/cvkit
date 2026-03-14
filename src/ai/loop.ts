@@ -9,10 +9,12 @@ import {PRIMARY_MODEL, getOpenAIClient} from '../lib/openai.js';
 import type {Workspace} from '../lib/workspace.js';
 import {buildSystemPrompt} from './system-prompt.js';
 import {
-  TOOL_SCHEMAS,
+  ALL_AI_TOOL_NAMES,
   describeAIToolCall,
   executeAITool,
   formatAIToolConfirmation,
+  getToolSchemas,
+  isAIToolName,
   isMutatingAITool,
   parseAIToolArguments,
   type AIToolArguments,
@@ -32,6 +34,7 @@ export interface AILoopOptions {
   onThinking: (message: string) => void;
   onToolCall: (tool: string, args: unknown) => void;
   onOutput: (text: string) => void;
+  toolNames?: readonly AIToolName[];
 }
 
 export interface PendingAIToolCall {
@@ -131,19 +134,21 @@ async function continueAILoop({
 }): Promise<AILoopRunResult> {
   let currentPreviousResponseId = previousResponseId;
   let currentInput = input;
+  const toolNames = options.toolNames ?? ALL_AI_TOOL_NAMES;
+  const allowedTools = new Set<AIToolName>(toolNames);
 
   for (let iteration = iterationStart; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
     options.onThinking(iteration === 0 ? 'Thinking...' : 'Preparing response...');
     const streamedChunks: string[] = [];
     const stream = client.responses.stream({
       model: PRIMARY_MODEL,
-      instructions: buildSystemPrompt(options.workspace),
+      instructions: buildSystemPrompt(options.workspace, toolNames),
       input: currentInput,
       previous_response_id: currentPreviousResponseId ?? undefined,
       parallel_tool_calls: false,
       store: true,
       tool_choice: 'auto',
-      tools: TOOL_SCHEMAS as unknown as OpenAI.Responses.ResponseCreateParams['tools']
+      tools: getToolSchemas(toolNames) as unknown as OpenAI.Responses.ResponseCreateParams['tools']
     });
 
     stream.on('response.output_text.delta', (event) => {
@@ -168,26 +173,36 @@ async function continueAILoop({
       };
     }
 
-    const parsedArgs = parseAIToolArguments(functionCall.name as AIToolName, functionCall.arguments);
-    if (isMutatingAITool(functionCall.name as AIToolName)) {
+    if (!isAIToolName(functionCall.name) || !allowedTools.has(functionCall.name)) {
+      const message = `Model requested unavailable tool: ${functionCall.name}.`;
+      options.onOutput(message);
+      return {
+        status: 'completed',
+        text: message,
+        responseId: response.id
+      };
+    }
+
+    const parsedArgs = parseAIToolArguments(functionCall.name, functionCall.arguments);
+    if (isMutatingAITool(functionCall.name)) {
       return {
         status: 'confirmation_required',
-        text: formatAIToolConfirmation(functionCall.name as AIToolName, parsedArgs),
+        text: formatAIToolConfirmation(functionCall.name, parsedArgs),
         responseId: response.id,
         pending: {
           responseId: response.id,
           callId: functionCall.call_id,
-          toolName: functionCall.name as AIToolName,
+          toolName: functionCall.name,
           args: parsedArgs,
-          prompt: formatAIToolConfirmation(functionCall.name as AIToolName, parsedArgs),
+          prompt: formatAIToolConfirmation(functionCall.name, parsedArgs),
           nextIteration: iteration + 1
         }
       };
     }
 
-    options.onThinking(describeAIToolCall(functionCall.name as AIToolName, parsedArgs));
+    options.onThinking(describeAIToolCall(functionCall.name, parsedArgs));
     options.onToolCall(functionCall.name, parsedArgs);
-    const toolResult = await executeAITool(functionCall.name as AIToolName, parsedArgs, options.workspace);
+    const toolResult = await executeAITool(functionCall.name, parsedArgs, options.workspace);
     currentInput = [
       {
         type: 'function_call_output',

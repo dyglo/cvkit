@@ -4,6 +4,7 @@ import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {runAILoopSession, type ConversationMessage} from '../src/ai/loop.js';
+import {READ_ONLY_AI_TOOL_NAMES} from '../src/ai/tools.js';
 import {getOpenAIClient, setOpenAIClientFactoryForTests} from '../src/lib/openai.js';
 import {routeCommand} from '../src/repl/router.js';
 import type {Workspace} from '../src/lib/workspace.js';
@@ -226,6 +227,41 @@ test('thinking updates include the tool name being executed', async (t) => {
 
   assert.ok(statuses.includes('Thinking...'));
   assert.ok(statuses.includes('Calling glob_files for pattern "**/*.jpg"...'));
+});
+
+test('read-only AI sessions reject unavailable mutating tools', async (t) => {
+  const workspaceDir = await createWorkspaceDir();
+  const workspace = createWorkspace(workspaceDir);
+  const controller = new MockResponsesController([
+    createFunctionCallResponse('resp-1', 'call-1', 'write_file', {
+      path: 'labels/new.txt',
+      content: 'hello'
+    })
+  ]);
+  const output: string[] = [];
+
+  setOpenAIClientFactoryForTests(() => controller.createClient());
+  t.after(async () => {
+    await rm(workspaceDir, {recursive: true, force: true});
+  });
+
+  const result = await runAILoopSession('write a file', [], {
+    workspace,
+    toolNames: READ_ONLY_AI_TOOL_NAMES,
+    onThinking: () => {
+      return;
+    },
+    onToolCall: () => {
+      return;
+    },
+    onOutput: (text) => {
+      output.push(text);
+    }
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.text, 'Model requested unavailable tool: write_file.');
+  assert.deepEqual(output, ['Model requested unavailable tool: write_file.']);
 });
 
 test('getOpenAIClient uses CVKIT_OPENAI_KEY when no user key is configured', async () => {

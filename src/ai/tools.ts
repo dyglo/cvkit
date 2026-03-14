@@ -5,6 +5,33 @@ import type {Workspace} from '../lib/workspace.js';
 import {editFile, globFiles, grepFiles, listDir, readFile, writeFile} from '../tools/index.js';
 import type {ToolResult} from '../tools/index.js';
 
+export type AIToolName =
+  | 'read_file'
+  | 'write_file'
+  | 'edit_file'
+  | 'glob_files'
+  | 'grep_files'
+  | 'inspect_image'
+  | 'list_dir';
+
+export const ALL_AI_TOOL_NAMES = [
+  'read_file',
+  'write_file',
+  'edit_file',
+  'glob_files',
+  'grep_files',
+  'inspect_image',
+  'list_dir'
+] as const satisfies readonly AIToolName[];
+
+export const READ_ONLY_AI_TOOL_NAMES = [
+  'read_file',
+  'glob_files',
+  'grep_files',
+  'inspect_image',
+  'list_dir'
+] as const satisfies readonly AIToolName[];
+
 export const TOOL_SCHEMAS = [
   {
     type: 'function',
@@ -150,15 +177,6 @@ type GrepFilesArgs = {pattern: string; file_pattern?: string; context_lines?: nu
 type InspectImageArgs = {path: string};
 type ListDirArgs = {path?: string};
 
-export type AIToolName =
-  | 'read_file'
-  | 'write_file'
-  | 'edit_file'
-  | 'glob_files'
-  | 'grep_files'
-  | 'inspect_image'
-  | 'list_dir';
-
 export type AIToolArguments =
   | ReadFileArgs
   | WriteFileArgs
@@ -171,6 +189,17 @@ export type AIToolArguments =
 export interface ParsedAIToolCall {
   name: AIToolName;
   arguments: AIToolArguments;
+}
+
+export function getToolSchemas(
+  toolNames: readonly AIToolName[] = ALL_AI_TOOL_NAMES
+): Array<(typeof TOOL_SCHEMAS)[number]> {
+  const allowed = new Set<AIToolName>(toolNames);
+  return TOOL_SCHEMAS.filter((schema) => allowed.has(schema.name as AIToolName));
+}
+
+export function isAIToolName(value: string): value is AIToolName {
+  return (ALL_AI_TOOL_NAMES as readonly string[]).includes(value);
 }
 
 export async function executeAITool(
