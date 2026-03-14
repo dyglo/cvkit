@@ -6,14 +6,15 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
-const cliEntry = path.join(projectRoot, 'src', 'cli.ts');
-const sampleImage = path.join(projectRoot, 'test', 'fixtures', 'sample.png');
+const cliEntry = path.join(projectRoot, 'dist', 'index.js');
+const sampleJpg = path.join(projectRoot, 'test', 'fixtures', 'sample.jpg');
+const samplePng = path.join(projectRoot, 'test', 'fixtures', 'sample.png');
 const nonImage = path.join(projectRoot, 'test', 'fixtures', 'not-image.txt');
 
 test('cvkit --version returns package version', async () => {
   const result = await runCli(['--version']);
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /cvkit v0\.1\.0/);
+  assert.match(result.stdout, /^0\.1\.0\r?\n$/);
 });
 
 test('cvkit --help returns usage information', async () => {
@@ -22,7 +23,7 @@ test('cvkit --help returns usage information', async () => {
   assert.match(result.stdout, /Usage: cvkit/);
   assert.match(result.stdout, /inspect/);
   assert.match(result.stdout, /config/);
-  assert.match(result.stdout, /convert/);
+  assert.doesNotMatch(result.stdout, /dataset|convert|describe|anomaly|history|label-assist|ask/);
 });
 
 test('bare cvkit renders splash and exits after Enter', async () => {
@@ -32,8 +33,15 @@ test('bare cvkit renders splash and exits after Enter', async () => {
   assert.match(result.stdout, /Press Enter to continue/);
 });
 
-test('inspect reports metadata for a valid image', async () => {
-  const result = await runCli(['inspect', sampleImage]);
+test('inspect reports metadata for a JPEG image', async () => {
+  const result = await runCli(['inspect', sampleJpg]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Dimensions\s+100 × 100/);
+  assert.match(result.stdout, /Format\s+JPEG/);
+});
+
+test('inspect reports metadata for a PNG image', async () => {
+  const result = await runCli(['inspect', samplePng]);
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Dimensions\s+100 × 100/);
   assert.match(result.stdout, /Format\s+PNG/);
@@ -55,22 +63,21 @@ test('config set creates config file and config list masks secrets', async () =>
   const home = await mkdtemp(path.join(os.tmpdir(), 'cvkit-home-'));
 
   try {
-    let result = await runCli(['config', 'set', 'OPENAI_API_KEY=sk-example-secret'], {home});
+    let result = await runCli(['config', 'list'], {home});
     assert.equal(result.code, 0);
+    assert.match(result.stdout, /No config values set\./);
 
-    result = await runCli(['config', 'set', 'MODEL=gpt-5.4'], {home});
+    result = await runCli(['config', 'set', 'OPENAI_API_KEY=sk-example-secret'], {home});
     assert.equal(result.code, 0);
 
     result = await runCli(['config', 'list'], {home});
     assert.equal(result.code, 0);
     assert.match(result.stdout, /OPENAI_API_KEY/);
     assert.doesNotMatch(result.stdout, /sk-example-secret/);
-    assert.match(result.stdout, /MODEL\s+gpt-5\.4/);
 
     const configPath = path.join(home, '.cvkit', 'config.json');
     const stored = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, string>;
     assert.equal(stored.OPENAI_API_KEY, 'sk-example-secret');
-    assert.equal(stored.MODEL, 'gpt-5.4');
   } finally {
     await rm(home, {recursive: true, force: true});
   }
@@ -83,7 +90,7 @@ function runCli(
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      ['--import', 'tsx', cliEntry, ...args],
+      [cliEntry, ...args],
       {
         cwd: projectRoot,
         env: {

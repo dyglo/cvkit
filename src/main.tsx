@@ -15,11 +15,6 @@ const BANNER_LINES = [
 ] as const;
 
 export async function runCliApp(): Promise<void> {
-  if (process.argv.includes('--version')) {
-    process.stdout.write(`cvkit v${PACKAGE_VERSION}\n`);
-    return;
-  }
-
   const program = buildCLI();
 
   if (process.argv.length <= 2) {
@@ -37,7 +32,7 @@ export async function runCliApp(): Promise<void> {
         process.stdout.write(`${line}\n`);
       }
       process.stdout.write('C O M P U T E R   V I S I O N   T O O L K I T\n');
-      process.stdout.write(`* Welcome to cvkit v${PACKAGE_VERSION} — Press Enter to continue\n`);
+      process.stdout.write(`* Welcome to cvkit v${PACKAGE_VERSION} - Press Enter to continue\n`);
       await waitForEnterOrEof();
     }
 
